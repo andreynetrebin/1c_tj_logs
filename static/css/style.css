@@ -1,0 +1,45 @@
+/* Компактные карточки сессий на главной */
+.list-group-item {
+    border-left: 3px solid transparent;
+    transition: border-left-color 0.2s;
+}
+
+.list-group-item:hover {
+    border-left-color: var(--bs-primary);
+    background-color: var(--bs-light);
+}
+
+.list-group-item:has(.badge.bg-primary) {
+    border-left-color: var(--bs-primary);
+}
+
+.list-group-item:has(.badge.bg-success) {
+    border-left-color: var(--bs-success);
+}
+
+.list-group-item:has(.badge.bg-danger) {
+    border-left-color: var(--bs-danger);
+}
+
+/* Анимация прогресс-бара */
+.progress-bar-animated {
+    animation: progress-bar-stripes 1s linear infinite;
+}
+
+@keyframes progress-bar-stripes {
+    from { background-position: 4px 0; }
+    to { background-position: 0 0; }
+}
+
+/* Адаптивность для мобильных */
+@media (max-width: 768px) {
+    .list-group-item {
+        flex-direction: column;
+        align-items: flex-start !important;
+    }
+    .list-group-item .text-end {
+        margin-top: 1rem;
+        width: 100%;
+        text-align: left !important;
+    }
+}

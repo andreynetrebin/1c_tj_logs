@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Парсинг логов{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">Парсинг технологических журналов</h1>
+
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>Выберите диапазон дат</h5>
+            </div>
+            <div class="card-body">
+                <form id="parsing-form">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="start-date" class="form-label">Дата начала</label>
+                            <input type="datetime-local" class="form-control" id="start-date" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="end-date" class="form-label">Дата окончания</label>
+                            <input type="datetime-local" class="form-control" id="end-date" required>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="include-all" checked>
+                            <label class="form-check-label" for="include-all">
+                                Включить все события без исключений
+                            </label>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-play-fill"></i> Запустить парсинг
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div id="progress-section" class="card d-none">
+            <div class="card-header">
+                <h5>Прогресс парсинга</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <div class="progress" style="height: 30px;">
+                        <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                             role="progressbar" style="width: 0%">0%</div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-3">
+                        <strong>Статус:</strong> <span id="status">Ожидание</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Файлов:</strong> <span id="files">0/0</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Событий:</strong> <span id="events">0</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Время:</strong> <span id="elapsed">0с</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let progressInterval = null;
+let currentSessionId = null;
+
+document.getElementById('parsing-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const startDate = document.getElementById('start-date').value;
+    const endDate = document.getElementById('end-date').value;
+
+    if (!startDate || !endDate) {
+        alert('Пожалуйста, выберите даты');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/parsing/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                start_date: startDate,
+                end_date: endDate,
+                include_all_events: true
+            })
+        });
+
+        const result = await response.json();
+        currentSessionId = result.session_id;
+
+        document.getElementById('progress-section').classList.remove('d-none');
+        startProgressPolling();
+
+    } catch (error) {
+        alert('Ошибка запуска парсинга: ' + error.message);
+    }
+});
+
+function startProgressPolling() {
+    progressInterval = setInterval(async () => {
+        if (!currentSessionId) return;
+
+        try {
+            const response = await fetch(`/api/parsing/progress/${currentSessionId}`);
+            const progress = await response.json();
+
+            updateProgress(progress);
+
+            if (progress.status === 'completed' || progress.status === 'failed') {
+                clearInterval(progressInterval);
+                setTimeout(() => {
+                    if (progress.status === 'completed') {
+                        window.location.href = `/analysis/${currentSessionId}`;
+                    }
+                }, 2000);
+            }
+        } catch (error) {
+            console.error('Error polling progress:', error);
+        }
+    }, 2000);
+}
+
+function updateProgress(progress) {
+    const progressBar = document.getElementById('progress-bar');
+    const statusEl = document.getElementById('status');
+    const filesEl = document.getElementById('files');
+    const eventsEl = document.getElementById('events');
+    const elapsedEl = document.getElementById('elapsed');
+
+    progressBar.style.width = `${progress.progress_percent}%`;
+    progressBar.textContent = `${progress.progress_percent.toFixed(1)}%`;
+
+    statusEl.textContent = progress.status;
+    filesEl.textContent = `${progress.processed_files}/${progress.total_files}`;
+    eventsEl.textContent = progress.total_events.toLocaleString('ru-RU');
+    elapsedEl.textContent = `${Math.floor(progress.elapsed_seconds)}с`;
+}
+</script>
+{% endblock %}

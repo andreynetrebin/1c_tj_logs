@@ -1,0 +1,435 @@
+<!-- templates/sessions.html -->
+{% extends "base.html" %}
+
+{% block title %}Сессии парсинга - TJ Log Analyzer{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Заголовок -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2>📋 Сессии парсинга</h2>
+            <p class="text-muted mb-0">История запусков и результаты обработки технологических журналов</p>
+        </div>
+        <a href="/interval" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Новый парсинг
+        </a>
+    </div>
+
+    <!-- 🔧 Форма фильтров -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <i class="bi bi-funnel"></i> Фильтры
+        </div>
+        <div class="card-body">
+            <form id="sessions-filter" class="row g-3" method="get" action="/sessions">
+                <!-- Статус -->
+                <div class="col-md-3">
+                    <label class="form-label small text-muted">Статус</label>
+                    <select class="form-select form-select-sm" name="status" id="filter-status">
+                        <option value="">Все статусы</option>
+                        <option value="pending" {% if filter_status == 'pending' %}selected{% endif %}>⏳ Ожидает</option>
+                        <option value="running" {% if filter_status == 'running' %}selected{% endif %}>🔄 Выполняется</option>
+                        <option value="completed" {% if filter_status == 'completed' %}selected{% endif %}>✅ Завершено</option>
+                        <option value="failed" {% if filter_status == 'failed' %}selected{% endif %}>❌ Ошибка</option>
+                    </select>
+                </div>
+
+                <!-- Дата от -->
+                <div class="col-md-3">
+                    <label class="form-label small text-muted">Дата от</label>
+                    <input type="date" class="form-control form-control-sm" name="date_from" id="filter-date-from"
+                           value="{{ filter_date_from or '' }}">
+                </div>
+
+                <!-- Дата до -->
+                <div class="col-md-3">
+                    <label class="form-label small text-muted">Дата до</label>
+                    <input type="date" class="form-control form-control-sm" name="date_to" id="filter-date-to"
+                           value="{{ filter_date_to or '' }}">
+                </div>
+
+                <!-- Кнопки -->
+                <div class="col-md-3 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary btn-sm w-100">
+                        <i class="bi bi-search"></i> Применить
+                    </button>
+                    <a href="/sessions" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-x-circle"></i> Сброс
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Результаты -->
+    {% if sessions %}
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <small class="text-muted">
+                Найдено: <strong>{{ sessions|length }}</strong> сессий
+                {% if filter_status or filter_date_from or filter_date_to %}
+                    <span class="badge bg-info">с фильтрами</span>
+                {% endif %}
+            </small>
+        </div>
+
+        <!-- 🔧 ТАБЛИЧНОЕ ОТОБРАЖЕНИЕ (вместо карточек) -->
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 100px;">🆔 Сессия</th>
+                        <th style="width: 220px;">📅 Интервал (МСК)</th>
+                        <th style="width: 100px;">📈 Статус</th>
+                        <th style="width: 90px;" class="text-end">📁 Файлы</th>
+                        <th style="width: 110px;" class="text-end">📊 События</th>
+                        <th style="width: 130px;">⏱ Прогресс</th>
+                        <th style="width: 100px;">💬 Коммент.</th>
+                        <th style="width: 150px;">🔧 Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for session in sessions %}
+                    <tr class="{% if session.status == 'running' %}table-info{% endif %}"
+                        data-session-id="{{ session.session_id }}"
+                        data-status="{{ session.status }}">
+
+                        <!-- ID сессии -->
+                        <td>
+                            <small class="text-monospace">{{ session.session_id[:8] }}...</small>
+                        </td>
+
+                        <!-- Интервал в МСК -->
+                        <td>
+                            {% if session.start_date and session.end_date %}
+                                {% set start_msk = session.start_date | to_msk %}
+                                {% set end_msk = session.end_date | to_msk %}
+                                <small>
+                                    {{ start_msk.strftime('%Y-%m-%d %H:%M') }}<br>
+                                    <span class="text-muted">—</span><br>
+                                    {{ end_msk.strftime('%Y-%m-%d %H:%M') }}
+                                </small>
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                            {% if session.directory_name %}
+                            <br><small class="text-muted">📁 {{ session.directory_name[:20] }}{% if session.directory_name|length > 20 %}...{% endif %}</small>
+                            {% endif %}
+                        </td>
+
+                        <!-- Статус (локализованный) -->
+                        <td>
+                            <span class="badge bg-{{ session.status | status_color }}" style="color: #000; font-weight: 600;">
+                                {{ session.status | localized_status }}
+                            </span>
+                        </td>
+
+                        <!-- Файлы -->
+                        <td class="text-end">
+                            <small>{{ session.processed_files | default(0) }}/{{ session.total_files | default(0) }}</small>
+                        </td>
+
+                        <!-- События -->
+                        <td class="text-end">
+                            <small>{{ session.total_events | default(0) | int | format_number }}</small>
+                        </td>
+
+                        <!-- Прогресс + длительность -->
+                        <td>
+                            {% set progress = session.progress_percent | default(0) %}
+                            {% if session.status == 'running' %}
+                            <div class="progress" style="height: 6px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                     style="width: {{ progress }}%"
+                                     role="progressbar"
+                                     aria-valuenow="{{ progress }}"
+                                     aria-valuemin="0"
+                                     aria-valuemax="100">
+                                </div>
+                            </div>
+                            <small class="text-muted">{{ progress | round(1) }}%</small>
+                            {% else %}
+                            <small class="text-muted">{{ progress | round(1) }}%</small>
+                            {% endif %}
+                            {% if session.elapsed_seconds %}
+                                {% set mins = (session.elapsed_seconds / 60) | int %}
+                                {% set secs = (session.elapsed_seconds % 60) | int %}
+                                <br><small class="text-muted">{{ mins }}м {{ secs }}с</small>
+                            {% endif %}
+                        </td>
+
+                        <!-- Комментарий -->
+                        <td>
+                            {% if session.comment %}
+                            <span class="text-truncate d-inline-block" style="max-width: 90px;" title="{{ session.comment }}">
+                                {{ session.comment[:15] }}{% if session.comment|length > 15 %}...{% endif %}
+                            </span>
+                            <button class="btn btn-link btn-sm p-0 ms-1" onclick="editComment('{{ session.session_id }}', '{{ session.comment | replace("'", "\\'") }}')" title="Редактировать">✏️</button>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Кнопки действий -->
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                {% if session.status == 'running' %}
+                                    <a href="/parsing/progress/{{ session.session_id }}" class="btn btn-outline-primary" title="Прогресс">👁</a>
+                                    <a href="/events/{{ session.session_id }}" class="btn btn-outline-primary" title="События">📋</a>
+                                {% elif session.status == 'completed' %}
+                                    <a href="/analysis/{{ session.session_id }}" class="btn btn-outline-success" title="Анализ">📊</a>
+                                    <a href="/events/{{ session.session_id }}" class="btn btn-outline-primary" title="События">👁</a>
+                                {% elif session.status == 'failed' %}
+                                    <button class="btn btn-outline-danger" onclick="retrySession('{{ session.session_id }}')" title="Повторить">🔄</button>
+                                {% else %}
+                                    <a href="/parsing/progress/{{ session.session_id }}" class="btn btn-outline-secondary" title="Детали">📋</a>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Пагинация (если нужно) -->
+        {% if sessions|length >= 100 %}
+        <div class="text-center mt-3">
+            <small class="text-muted">
+                Показаны последние 100 сессий.
+                <a href="#" class="text-decoration-none">Загрузить ещё →</a>
+            </small>
+        </div>
+        {% endif %}
+
+    {% else %}
+        <!-- Нет сессий -->
+        <div class="alert alert-info text-center py-5">
+            <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+            <h5>Нет сохранённых сессий парсинга</h5>
+            <p class="mb-4 text-muted">
+                {% if filter_status or filter_date_from or filter_date_to %}
+                    Попробуйте сбросить фильтры или изменить параметры поиска.
+                {% else %}
+                    Запустите первый парсинг технологических журналов, чтобы увидеть здесь историю сессий.
+                {% endif %}
+            </p>
+            <div class="d-flex justify-content-center gap-2">
+                {% if filter_status or filter_date_from or filter_date_to %}
+                <a href="/sessions" class="btn btn-outline-secondary">
+                    <i class="bi bi-x-circle"></i> Сбросить фильтры
+                </a>
+                {% endif %}
+                <a href="/interval" class="btn btn-primary">
+                    <i class="bi bi-play-circle"></i> Запустить парсинг
+                </a>
+            </div>
+        </div>
+    {% endif %}
+</div>
+
+<!-- Modal для редактирования комментария -->
+<div class="modal fade" id="commentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">✏️ Комментарий к сессии</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-session-id">
+                <textarea class="form-control" id="edit-comment" rows="3" placeholder="Опишите цель парсинга, особенности..."></textarea>
+                <small class="text-muted">Комментарий поможет ориентироваться в истории запусков</small>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary" onclick="saveComment()">💾 Сохранить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal для подтверждения повтора -->
+<div class="modal fade" id="retryModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">🔄 Повторить парсинг</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Запустить парсинг с теми же параметрами?</p>
+                <code id="retry-session-id" class="d-block bg-light p-2 rounded mb-3"></code>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary" id="confirm-retry-btn">Да, повторить</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Глобальные переменные
+let commentModal = null;
+let retryModal = null;
+
+// Инициализация
+document.addEventListener('DOMContentLoaded', function() {
+    // Модальные окна
+    const commentEl = document.getElementById('commentModal');
+    if (commentEl) commentModal = new bootstrap.Modal(commentEl);
+
+    const retryEl = document.getElementById('retryModal');
+    if (retryEl) retryModal = new bootstrap.Modal(retryEl);
+
+    // Обработчик формы фильтров
+    const filterForm = document.getElementById('sessions-filter');
+    if (filterForm) {
+        filterForm.addEventListener('submit', function(e) {
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Фильтрация...';
+            submitBtn.disabled = true;
+        });
+    }
+
+    // Авто-обновление прогресса для running-сессий (адаптировано для таблицы)
+    startProgressAutoUpdate();
+});
+
+// Редактирование комментария
+function editComment(sessionId, currentComment) {
+    document.getElementById('edit-session-id').value = sessionId;
+    document.getElementById('edit-comment').value = currentComment || '';
+    if (commentModal) commentModal.show();
+}
+
+// Сохранение комментария
+async function saveComment() {
+    const sessionId = document.getElementById('edit-session-id').value;
+    const comment = document.getElementById('edit-comment').value;
+
+    try {
+        const response = await fetch(`/api/sessions/${sessionId}/comment`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comment })
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        if (commentModal) commentModal.hide();
+        window.location.reload();
+
+    } catch (error) {
+        console.error('❌ Ошибка сохранения комментария:', error);
+        alert('Не удалось сохранить: ' + error.message);
+    }
+}
+
+// Повтор сессии
+function retrySession(sessionId) {
+    document.getElementById('retry-session-id').textContent = sessionId;
+    if (retryModal) retryModal.show();
+}
+
+// Обработчик подтверждения повтора
+document.getElementById('confirm-retry-btn')?.addEventListener('click', async function() {
+    const sessionId = document.getElementById('retry-session-id').textContent;
+
+    try {
+        const response = await fetch(`/api/parsing/progress/${sessionId}`);
+        const data = await response.json();
+
+        if (data.start_date && data.end_date) {
+            const start = encodeURIComponent(data.start_date);
+            const end = encodeURIComponent(data.end_date);
+            window.location.href = `/interval?start=${start}&end=${end}`;
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Не удалось получить данные сессии');
+    }
+
+    if (retryModal) retryModal.hide();
+});
+
+// 🔧 Авто-обновление прогресса для running-сессий (адаптировано для таблицы)
+function startProgressAutoUpdate() {
+    // 🔧 Ищем строки таблицы со статусом "Выполняется"
+    const runningRows = document.querySelectorAll('tbody tr[data-status="running"]');
+
+    if (runningRows.length === 0) return;
+
+    setInterval(async function() {
+        for (const row of runningRows) {
+            const sessionId = row.getAttribute('data-session-id');
+            if (!sessionId) continue;
+
+            try {
+                const response = await fetch(`/api/parsing/progress/${sessionId}`);
+                if (!response.ok) continue;
+
+                const data = await response.json();
+
+                // Обновить прогресс-бар
+                const progressBar = row.querySelector('.progress-bar');
+                if (progressBar && data.progress_percent !== undefined) {
+                    progressBar.style.width = `${data.progress_percent}%`;
+                    progressBar.setAttribute('aria-valuenow', data.progress_percent);
+                }
+
+                // Обновить процент рядом с прогресс-баром
+                const progressText = progressBar?.parentElement?.nextElementSibling;
+                if (progressText && data.progress_percent !== undefined) {
+                    progressText.textContent = `${data.progress_percent.toFixed(1)}%`;
+                }
+
+                // Обновить счётчики файлов и событий
+                const cells = row.querySelectorAll('td');
+                if (cells.length >= 5 && data.processed_files !== undefined) {
+                    // Колонка "Файлы" (индекс 3)
+                    if (cells[3]) cells[3].innerHTML = `<small>${data.processed_files}/${data.total_files}</small>`;
+                    // Колонка "События" (индекс 4)
+                    if (cells[4]) cells[4].innerHTML = `<small>${new Intl.NumberFormat('ru-RU').format(data.total_events)}</small>`;
+                }
+
+            } catch (error) {
+                console.warn(`Failed to update ${sessionId}:`, error);
+            }
+        }
+    }, 30000); // Каждые 30 секунд
+}
+
+// 🔧 Полифиллы для старых браузеров
+if (!Element.prototype.matches) {
+    Element.prototype.matches = Element.prototype.msMatchesSelector || Element.prototype.webkitMatchesSelector;
+}
+if (!Element.prototype.closest) {
+    Element.prototype.closest = function(s) {
+        var el = this;
+        do {
+            if (el.matches(s)) return el;
+            el = el.parentElement || el.parentNode;
+        } while (el !== null && el.nodeType === 1);
+        return null;
+    };
+}
+</script>
+
+<!-- 🔧 Дополнительные фильтры Jinja2 для таблицы -->
+<script type="application/json" id="jinja-filters">
+{
+  "status_color": {
+    "pending": "secondary",
+    "running": "primary",
+    "completed": "success",
+    "failed": "danger"
+  },
+  "format_number": "ru-RU"
+}
+</script>
+{% endblock %}

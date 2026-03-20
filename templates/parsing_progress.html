@@ -1,0 +1,229 @@
+<!-- templates/parsing_progress.html -->
+{% extends "base.html" %}
+
+{% block title %}Прогресс парсинга - {{ session_id }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">📊 Прогресс парсинга</h4>
+            </div>
+            <div class="card-body">
+                <!-- ID сессии -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold">ID сессии</label>
+                    <code class="d-block bg-light p-2 rounded">{{ session_id }}</code>
+                </div>
+
+                <!-- Статус -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Статус</label>
+                    <div id="status-badge" class="badge bg-secondary">Загрузка...</div>
+                </div>
+
+                <!-- Прогресс-бар -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Прогресс</label>
+                    <div class="progress" style="height: 25px;">
+                        <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                             role="progressbar" style="width: 0%">0%</div>
+                    </div>
+                </div>
+
+                <!-- 🔧 Блок текущего файла (обновляется через JavaScript) -->
+                <div id="current-file-block" class="card mb-4 border-info d-none">
+                    <div class="card-header bg-info text-white">
+                        <i class="bi bi-file-earmark-code"></i> Текущий файл
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <h6 class="card-title mb-2">
+                                    <i class="bi bi-file-text"></i> <span id="current-file-name">--</span>
+                                </h6>
+                                <p class="card-text small text-muted mb-1">
+                                    <i class="bi bi-folder"></i> <span id="current-file-path">--</span>
+                                </p>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <div class="small">
+                                    <span class="badge bg-secondary mb-1">
+                                        📦 <span id="current-file-size">--</span> МБ
+                                    </span>
+                                    <br>
+                                    <span class="badge bg-primary">
+                                        ⚡ <span id="current-file-events">0</span> событий
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Статистика -->
+                <div class="row text-center mb-3">
+                    <div class="col-4">
+                        <div class="border rounded p-2">
+                            <small class="text-muted">Файлов</small><br>
+                            <strong id="files-count">0/0</strong>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="border rounded p-2">
+                            <small class="text-muted">Событий</small><br>
+                            <strong id="events-count">0</strong>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="border rounded p-2">
+                            <small class="text-muted">Время</small><br>
+                            <strong id="elapsed-time">0с</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 🔧 Кнопки действий (обновляются через JavaScript) -->
+                <div class="d-grid gap-2" id="action-buttons">
+                    <!-- Заполняется динамически в updateUI() -->
+                    <a href="/interval" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-left"></i> Новый парсинг
+                    </a>
+                </div>
+
+                <!-- Сообщение об ошибке -->
+                <div id="error-message" class="alert alert-danger d-none mt-3"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Авто-обновление каждые 2 секунды -->
+<script>
+const sessionId = '{{ session_id }}';
+let pollInterval = null;
+
+async function fetchProgress() {
+    try {
+        const response = await fetch(`/api/parsing/progress/${sessionId}`);
+        const data = await response.json();
+
+        updateUI(data);
+
+        // Если завершено или ошибка — останавливаем опрос
+        if (data.status === 'completed' || data.status === 'failed') {
+            clearInterval(pollInterval);
+        }
+    } catch (error) {
+        console.error('Error fetching progress:', error);
+        document.getElementById('error-message').textContent = 'Ошибка обновления статуса';
+        document.getElementById('error-message').classList.remove('d-none');
+    }
+}
+
+function updateUI(data) {
+    // Статус
+    const statusEl = document.getElementById('status-badge');
+    const statusColors = {
+        'pending': 'bg-secondary',
+        'running': 'bg-primary',
+        'completed': 'bg-success',
+        'failed': 'bg-danger'
+    };
+    statusEl.className = `badge ${statusColors[data.status] || 'bg-secondary'}`;
+    statusEl.textContent = data.status;
+
+    // Прогресс
+    const progressBar = document.getElementById('progress-bar');
+    progressBar.style.width = `${data.progress_percent}%`;
+    progressBar.textContent = `${data.progress_percent.toFixed(1)}%`;
+
+    // Статистика
+    document.getElementById('files-count').textContent = `${data.processed_files}/${data.total_files}`;
+    document.getElementById('events-count').textContent = data.total_events.toLocaleString('ru-RU');
+    if (data.elapsed_seconds) {
+        document.getElementById('elapsed-time').textContent = `${Math.floor(data.elapsed_seconds)}с`;
+    }
+
+    // 🔧 Обновление информации о текущем файле
+    const currentFileBlock = document.getElementById('current-file-block');
+    if (data.current_file && data.status === 'running') {
+        currentFileBlock.classList.remove('d-none');
+        document.getElementById('current-file-name').textContent = data.current_file.name || '--';
+        document.getElementById('current-file-path').textContent = data.current_file.path || '--';
+        document.getElementById('current-file-size').textContent =
+            data.current_file.size_mb ? data.current_file.size_mb.toFixed(2) : '--';
+        document.getElementById('current-file-events').textContent =
+            (data.current_file.events_count || 0).toLocaleString('ru-RU');
+    } else {
+        currentFileBlock.classList.add('d-none');
+    }
+
+    // 🔧 Обновление кнопок действий в зависимости от статуса
+    updateActionButtons(data);
+
+    // Если ошибка — показываем сообщение
+    if (data.status === 'failed' && data.error_message) {
+        document.getElementById('error-message').textContent = data.error_message;
+        document.getElementById('error-message').classList.remove('d-none');
+    }
+}
+
+// 🔧 НОВАЯ ФУНКЦИЯ: Обновление кнопок действий
+function updateActionButtons(data) {
+    const container = document.getElementById('action-buttons');
+    if (!container) return;
+
+    let html = '';
+
+    if (data.status === 'running') {
+        // 🔧 Во время парсинга: кнопка просмотра событий в реальном времени
+        html += `
+            <a href="/events/${sessionId}" class="btn btn-outline-primary">
+                👁 Просмотреть события (в реальном времени)
+            </a>
+        `;
+    } else if (data.status === 'completed') {
+        // После завершения: все кнопки
+        if (data.total_events > 0) {
+            html += `
+                <a href="/analysis/${sessionId}" class="btn btn-success">
+                    📊 Перейти к анализу
+                </a>
+            `;
+        }
+        html += `
+            <a href="/events/${sessionId}" class="btn btn-primary">
+                📋 Просмотреть все события
+            </a>
+        `;
+    } else if (data.status === 'failed') {
+        // При ошибке: только повтор
+        html += `
+            <a href="/interval" class="btn btn-outline-secondary">
+                🔄 Попробовать снова
+            </a>
+        `;
+    }
+
+    // Общая кнопка "Новый парсинг" всегда доступна
+    html += `
+        <a href="/sessions" class="btn btn-outline-secondary">
+            📋 Все сессии
+        </a>
+        <a href="/interval" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Новый парсинг
+        </a>
+    `;
+
+    container.innerHTML = html;
+}
+
+// Запускаем опрос при загрузке
+document.addEventListener('DOMContentLoaded', function() {
+    fetchProgress();  // Первый запрос сразу
+    pollInterval = setInterval(fetchProgress, 2000);  // Затем каждые 2 секунды
+});
+</script>
+{% endblock %}

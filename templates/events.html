@@ -1,0 +1,1249 @@
+{% extends "base.html" %}
+
+{% block title %}События - {{ session_id }}{% endblock %}
+
+{% block content %}
+<!-- Заголовок с кнопками -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h1>📋 Просмотр событий</h1>
+                <p class="text-muted mb-0">Сессия: <code>{{ session_id }}</code></p>
+            </div>
+            <div class="d-flex gap-2">
+                <!-- 🔧 НОВАЯ КНОПКА: Отчет -->
+                <button class="btn btn-success" onclick="openReportModal()">
+                    📈 Отчет
+                </button>
+                <a href="/analysis/{{ session_id }}" class="btn btn-secondary">
+                    ← Назад к анализу
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Форма поиска и фильтров -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">🔍 Поиск и фильтры</div>
+            <div class="card-body">
+                <form id="filter-form" class="row g-3">
+                    <!-- Тип события -->
+                    <div class="col-md-2">
+                        <label class="form-label">Тип события</label>
+                        <div class="input-group">
+                            <select class="form-select" id="filter-event-name" name="event_name">
+                                <option value="">Все типы</option>
+                            </select>
+                            <button class="btn btn-outline-secondary" type="button" onclick="loadEventTypes()" title="Обновить список">
+                                🔄
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Пользователь -->
+                    <div class="col-md-2">
+                        <label class="form-label">Пользователь</label>
+                        <div class="input-group">
+                            <select class="form-select" id="filter-user" name="user">
+                                <option value="">Все пользователи</option>
+                            </select>
+                            <button class="btn btn-outline-secondary" type="button" onclick="loadUsers()" title="Обновить список">
+                                🔄
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Ошибка MSSQL -->
+                    <div class="col-md-3">
+                        <label class="form-label">Ошибка MSSQL</label>
+                        <div class="input-group">
+                            <select class="form-select" id="filter-mssql-error">
+                                <option value="">Все ошибки</option>
+                            </select>
+                            <button class="btn btn-outline-secondary" type="button" onclick="loadMssqlErrors()" title="Обновить список">
+                                🔄
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Мин. длительность -->
+                    <div class="col-md-2">
+                        <label class="form-label">Мин. длительность (мс)</label>
+                        <input type="number" class="form-control" id="filter-min-dur" name="min_duration_ms" placeholder="0" min="0" step="0.01">
+                    </div>
+
+                    <!-- Макс. длительность -->
+                    <div class="col-md-2">
+                        <label class="form-label">Макс. длительность (мс)</label>
+                        <input type="number" class="form-control" id="filter-max-dur" name="max_duration_ms" placeholder="∞" min="0" step="0.01">
+                    </div>
+
+                    <!-- Поиск по тексту -->
+                    <div class="col-md-4">
+                        <label class="form-label">Поиск по тексту</label>
+                        <input type="text" class="form-control" id="filter-search" placeholder="SQL, exception, context...">
+                    </div>
+
+                    <!-- Кнопки -->
+                    <div class="col-md-2 d-flex align-items-end gap-2">
+                        <button type="submit" class="btn btn-primary">🔍 Найти</button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="resetFilters()">Сброс</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Таблица событий -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>📊 Результаты</span>
+                <span id="results-count" class="badge bg-secondary">0 событий</span>
+            </div>
+            <div class="card-body">
+                <div id="events-table">
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Загрузка...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Загрузка событий...</p>
+                    </div>
+                </div>
+
+                <!-- Пагинация -->
+                <nav class="mt-3" id="pagination" style="display: none;">
+                    <ul class="pagination justify-content-center mb-0">
+                        <li class="page-item" id="prev-page">
+                            <a class="page-link" href="#" onclick="changePage(currentPage - 1); return false;">← Пред</a>
+                        </li>
+                        <li class="page-item disabled">
+                            <span class="page-link" id="page-info">Стр. 1</span>
+                        </li>
+                        <li class="page-item" id="next-page">
+                            <a class="page-link" href="#" onclick="changePage(currentPage + 1); return false;">След →</a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal для деталей события -->
+<div class="modal fade" id="eventModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">📋 Детали события</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="event-modal-body">
+                <div class="text-center">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Загрузка...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- 🔧 Modal для отчёта по сессии -->
+<div class="modal fade" id="reportModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">📈 Отчёт по сессии</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="report-modal-body">
+                <div class="text-center py-5">
+                    <div class="spinner-border text-success" role="status">
+                        <span class="visually-hidden">Загрузка...</span>
+                    </div>
+                    <p class="mt-3 text-muted">Генерация отчёта...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                <button type="button" class="btn btn-outline-primary" onclick="exportReport()">
+                    💾 Экспорт CSV
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Глобальные переменные
+let currentPage = 1;
+const pageSize = 50;
+let currentFilters = {};
+let eventModal = null;
+let eventTypesLoaded = false;
+let usersLoaded = false;
+let mssqlErrorsLoaded = false;
+
+// 🔧 Состояние сортировки
+let currentSort = {
+    column: 'timestamp',      // По умолчанию сортировка по времени
+    order: 'desc'             // По умолчанию: новые сверху
+};
+
+// Инициализация при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    // Инициализация модального окна
+    const modalEl = document.getElementById('eventModal');
+    if (modalEl) {
+        eventModal = new bootstrap.Modal(modalEl);
+    }
+
+    // Загрузка всех списков для фильтров + событий
+    loadEventTypes();
+    loadUsers();
+    loadMssqlErrors();
+    loadEvents();
+
+    // Обработчик формы фильтров
+    document.getElementById('filter-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        currentPage = 1;  // Сброс на первую страницу при новом поиске
+        loadEvents();
+    });
+});
+
+// Сброс фильтров
+function resetFilters() {
+    document.getElementById('filter-event-name').value = '';
+    document.getElementById('filter-user').value = '';
+    document.getElementById('filter-mssql-error').value = '';
+    document.getElementById('filter-min-dur').value = '';
+    document.getElementById('filter-max-dur').value = '';
+    document.getElementById('filter-search').value = '';
+    currentPage = 1;
+    loadEvents();
+}
+
+// 🔧 Переключение сортировки по колонке
+function toggleSort(column) {
+    // Если кликнули по той же колонке — меняем порядок
+    if (currentSort.column === column) {
+        currentSort.order = currentSort.order === 'asc' ? 'desc' : 'asc';
+    } else {
+        // Новая колонка — по умолчанию сортировка по убыванию
+        currentSort.column = column;
+        currentSort.order = 'desc';
+    }
+
+    // Сброс на первую страницу при смене сортировки
+    currentPage = 1;
+
+    // Перезагрузить события с новой сортировкой
+    loadEvents();
+
+    // Обновить визуальные индикаторы
+    updateSortIndicators();
+}
+
+// 🔧 Обновление визуальных индикаторов сортировки (▲/▼)
+function updateSortIndicators() {
+    // Убрать все индикаторы
+    document.querySelectorAll('.sort-indicator').forEach(el => {
+        el.textContent = '';
+        el.classList.remove('text-primary');
+    });
+
+    // Добавить индикатор к активной колонке
+    const header = document.getElementById(`header-${currentSort.column}`);
+    if (header) {
+        const indicator = header.querySelector('.sort-indicator');
+        if (indicator) {
+            indicator.textContent = currentSort.order === 'asc' ? ' ▲' : ' ▼';
+            indicator.classList.add('text-primary');
+        }
+    }
+}
+
+// Загрузка типов событий из API
+async function loadEventTypes() {
+    const select = document.getElementById('filter-event-name');
+    if (!select) return;
+
+    const currentValue = select.value;
+    select.innerHTML = '<option value="">Загрузка...</option>';
+    select.disabled = true;
+
+    try {
+        const sessionId = '{{ session_id }}';
+        const response = await fetch(`/api/events/event-types?session_id=${sessionId}`);
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const eventTypes = await response.json();
+
+        select.innerHTML = '<option value="">Все типы</option>';
+        eventTypes.forEach(type => {
+            const option = document.createElement('option');
+            option.value = type;
+            option.textContent = type;
+            select.appendChild(option);
+        });
+
+        if (currentValue && eventTypes.includes(currentValue)) {
+            select.value = currentValue;
+        }
+
+        eventTypesLoaded = true;
+        console.log(`✅ Загружено ${eventTypes.length} типов событий`);
+
+    } catch (error) {
+        console.error('❌ Ошибка загрузки типов событий:', error);
+        select.innerHTML = '<option value="">⚠️ Ошибка загрузки</option>';
+    } finally {
+        select.disabled = false;
+    }
+}
+
+// Загрузка пользователей из API
+async function loadUsers() {
+    const select = document.getElementById('filter-user');
+    if (!select) return;
+
+    const currentValue = select.value;
+    select.innerHTML = '<option value="">Загрузка...</option>';
+    select.disabled = true;
+
+    try {
+        const sessionId = '{{ session_id }}';
+        const response = await fetch(`/api/events/users?session_id=${sessionId}`);
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const users = await response.json();
+
+        select.innerHTML = '<option value="">Все пользователи</option>';
+        users.forEach(user => {
+            const option = document.createElement('option');
+            option.value = user;
+            option.textContent = user;
+            select.appendChild(option);
+        });
+
+        if (currentValue && users.includes(currentValue)) {
+            select.value = currentValue;
+        }
+
+        usersLoaded = true;
+        console.log(`✅ Загружено ${users.length} пользователей`);
+
+    } catch (error) {
+        console.error('❌ Ошибка загрузки пользователей:', error);
+        select.innerHTML = '<option value="">⚠️ Ошибка загрузки</option>';
+    } finally {
+        select.disabled = false;
+    }
+}
+
+// Загрузка кодов ошибок MSSQL из API
+async function loadMssqlErrors() {
+    const select = document.getElementById('filter-mssql-error');
+    if (!select) return;
+
+    const currentValue = select.value;
+    select.innerHTML = '<option value="">Загрузка...</option>';
+    select.disabled = true;
+
+    try {
+        const sessionId = '{{ session_id }}';
+        const response = await fetch(`/api/events/mssql-errors?session_id=${sessionId}`);
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const errors = await response.json();
+
+        select.innerHTML = '<option value="">Все ошибки</option>';
+        errors.forEach(err => {
+            const option = document.createElement('option');
+            option.value = err.code;
+            option.textContent = err.label;
+            select.appendChild(option);
+        });
+
+        if (currentValue && errors.some(e => e.code == currentValue)) {
+            select.value = currentValue;
+        }
+
+        mssqlErrorsLoaded = true;
+        console.log(`✅ Загружено ${errors.length} кодов ошибок MSSQL`);
+
+    } catch (error) {
+        console.error('❌ Ошибка загрузки ошибок MSSQL:', error);
+        select.innerHTML = '<option value="">⚠️ Ошибка загрузки</option>';
+    } finally {
+        select.disabled = false;
+    }
+}
+
+// Загрузка событий с сервера
+async function loadEvents() {
+    const container = document.getElementById('events-table');
+    container.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Загрузка...</span>
+            </div>
+            <p class="mt-2 text-muted">Загрузка событий...</p>
+        </div>
+    `;
+
+    const eventName = document.getElementById('filter-event-name').value;
+    const search = document.getElementById('filter-search').value;
+    const user = document.getElementById('filter-user').value;
+    const mssqlError = document.getElementById('filter-mssql-error').value;
+    const minDur = document.getElementById('filter-min-dur').value;
+    const maxDur = document.getElementById('filter-max-dur').value;
+
+    // Формируем URL с параметрами
+    let url = `/api/events/{{ session_id }}?page=${currentPage}&page_size=${pageSize}`;
+
+    if (eventName) url += `&event_name=${encodeURIComponent(eventName)}`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (user) url += `&user=${encodeURIComponent(user)}`;
+    if (mssqlError) url += `&mssql_error=${encodeURIComponent(mssqlError)}`;
+
+    // Числовые параметры длительности
+    if (minDur && !isNaN(parseFloat(minDur))) {
+        url += `&min_duration_ms=${parseFloat(minDur)}`;
+    }
+    if (maxDur && !isNaN(parseFloat(maxDur))) {
+        url += `&max_duration_ms=${parseFloat(maxDur)}`;
+    }
+
+    // 🔧 Параметры сортировки
+    url += `&sort_by=${encodeURIComponent(currentSort.column)}&sort_order=${currentSort.order}`;
+
+    // Сохраняем текущие фильтры
+    currentFilters = { eventName, search, user, mssqlError, minDur, maxDur };
+
+    try {
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        renderEvents(data);
+
+        // Обновить индикаторы сортировки после рендера таблицы
+        updateSortIndicators();
+
+    } catch (error) {
+        console.error('❌ Ошибка загрузки событий:', error);
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <strong>Ошибка:</strong> ${error.message}
+            </div>
+        `;
+    }
+}
+
+// Отрисовка таблицы событий
+function renderEvents(data) {
+    const container = document.getElementById('events-table');
+
+    if (!data.events || data.events.length === 0) {
+        container.innerHTML = '<p class="text-muted">События не найдены</p>';
+        return;
+    }
+
+    // 🔧 Заголовки с кликом для сортировки
+    const durationHeader = `
+        <th style="width: 120px; cursor: pointer;" onclick="toggleSort('duration_ms')" title="Сортировать по длительности">
+            ⏱ Длительность <span id="header-duration_ms" class="sort-indicator"></span>
+        </th>
+    `;
+
+    let html = `
+        <div class="table-responsive">
+            <table class="table table-striped table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 180px; cursor: pointer;" onclick="toggleSort('timestamp')" title="Сортировать по времени">
+                            ⏰ Время <span id="header-timestamp" class="sort-indicator"></span>
+                        </th>
+                        <th>📝 Событие</th>
+                        <th style="width: 80px;">🔢 Уровень</th>
+                        ${durationHeader}
+                        <th>🖥 Процесс</th>
+                        <th style="width: 120px;">🚨 Severity</th>
+                        <th style="width: 130px;">⚠️ Ошибка MSSQL</th>
+                        <th style="width: 80px;">🔍</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    data.events.forEach(event => {
+        // Формирование отображения кода ошибки MSSQL
+        const mssqlErrorDisplay = event.mssql_error_code
+            ? `<span class="badge bg-danger" title="Код ошибки MSSQL: ${event.mssql_error_code}">⚠️ ${event.mssql_error_code}</span>`
+            : '<span class="text-muted small">—</span>';
+
+        html += `
+            <tr>
+                <td><small class="text-muted">${new Date(event.timestamp).toLocaleString('ru-RU')}</small></td>
+                <td>
+                    ${escapeHtml(event.event_name)}
+                    ${event.table_name ? `<br><small class="text-muted">${escapeHtml(event.table_name)}</small>` : ''}
+                </td>
+                <td><span class="badge bg-info text-dark">${event.level}</span></td>
+                <td><code>${event.duration_ms?.toFixed(2) || '-'} мс</code></td>
+                <td><small>${escapeHtml(event.process_name || '-')}</small></td>
+                <td><span class="badge bg-${getSeverityColor(event.severity)}">${event.severity}</span></td>
+                <td>${mssqlErrorDisplay}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="showEventDetail(this)"
+                            data-event='${JSON.stringify(event).replace(/'/g, "&apos;")}'
+                            title="Показать детали">
+                        🔍
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table></div>';
+
+    // Пагинация
+    html += `
+        <nav class="mt-3" id="pagination" style="${data.total_pages <= 1 ? 'display: none;' : ''}">
+            <ul class="pagination justify-content-center mb-0">
+                <li class="page-item ${currentPage <= 1 ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="changePage(${currentPage - 1}); return false;">← Пред</a>
+                </li>
+                <li class="page-item disabled">
+                    <span class="page-link" id="page-info">Стр. ${currentPage} / ${data.total_pages}</span>
+                </li>
+                <li class="page-item ${currentPage >= data.total_pages ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="changePage(${currentPage + 1}); return false;">След →</a>
+                </li>
+            </ul>
+        </nav>
+    `;
+
+    container.innerHTML = html;
+
+    // Обновить счётчик результатов
+    const resultsCount = document.getElementById('results-count');
+    if (resultsCount) {
+        resultsCount.textContent = `${data.total.toLocaleString('ru-RU')} событий`;
+        resultsCount.className = `badge bg-${data.total > 0 ? 'success' : 'secondary'}`;
+    }
+}
+
+// Изменение страницы
+function changePage(page) {
+    if (page < 1) return;
+    currentPage = page;
+    loadEvents();
+}
+
+// Определение цвета для severity
+function getSeverityColor(severity) {
+    const colors = {
+        'critical': 'danger',
+        'warning': 'warning text-dark',
+        'info': 'info text-dark',
+        'debug': 'secondary'
+    };
+    return colors[severity?.toLowerCase()] || 'secondary';
+}
+
+// Показать детали события
+async function showEventDetail(button) {
+    const eventData = JSON.parse(button.getAttribute('data-event'));
+
+    const modalBody = document.getElementById('event-modal-body');
+    const modalTitle = document.querySelector('#eventModal .modal-title');
+
+    if (modalTitle) {
+        modalTitle.innerHTML = `📋 Детали события: <code>${escapeHtml(eventData.event_name)}</code>`;
+    }
+
+    const formatValue = (value) => {
+        if (value === null || value === undefined || value === '') return '-';
+        if (typeof value === 'object') return JSON.stringify(value, null, 2);
+        if (typeof value === 'number') return value.toLocaleString('ru-RU');
+        return escapeHtml(String(value));
+    };
+
+    const toggleButton = `
+        <div class="mb-3">
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleAllFields(this)">
+                <span class="toggle-text">📄 Показать все поля</span>
+            </button>
+            <span class="text-muted ms-2 small">Показаны основные поля. Нажмите для отображения всех технических деталей.</span>
+        </div>
+    `;
+
+    const basicFields = `
+        <div class="card mb-3">
+            <div class="card-header bg-primary text-white">
+                <h6 class="mb-0">📋 Основная информация</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <dl class="row mb-0">
+                            <dt class="col-sm-5 text-muted">⏰ Время</dt>
+                            <dd class="col-sm-7"><strong>${eventData.timestamp ? new Date(eventData.timestamp).toLocaleString('ru-RU') : '-'}</strong></dd>
+                            <dt class="col-sm-5 text-muted">📝 Тип события</dt>
+                            <dd class="col-sm-7"><span class="badge bg-secondary">${escapeHtml(eventData.event_name)}</span></dd>
+                            <dt class="col-sm-5 text-muted">🔢 Уровень</dt>
+                            <dd class="col-sm-7"><span class="badge bg-info text-dark">${eventData.level}</span></dd>
+                            <dt class="col-sm-5 text-muted">⏱ Длительность</dt>
+                            <dd class="col-sm-7"><code>${eventData.duration_ms ? eventData.duration_ms.toFixed(2) + ' мс' : '-'}</code></dd>
+                            <dt class="col-sm-5 text-muted">🚨 Severity</dt>
+                            <dd class="col-sm-7"><span class="badge bg-${getSeverityColor(eventData.severity)}">${eventData.severity}</span></dd>
+                            <dt class="col-sm-5 text-muted">📁 Категория</dt>
+                            <dd class="col-sm-7">${escapeHtml(eventData.category) || '-'}</dd>
+                        </dl>
+                    </div>
+                    <div class="col-md-6">
+                        <dl class="row mb-0">
+                            <dt class="col-sm-5 text-muted">📁 Инфобаза</dt>
+                            <dd class="col-sm-7">${escapeHtml(eventData.directory_name) || '-'}</dd>
+                            <dt class="col-sm-5 text-muted">🖥 Процесс</dt>
+                            <dd class="col-sm-7">${escapeHtml(eventData.process_name) || '-'}</dd>
+                            <dt class="col-sm-5 text-muted">👤 Пользователь</dt>
+                            <dd class="col-sm-7">${escapeHtml(eventData.user_name) || '-'}</dd>
+                            <dt class="col-sm-5 text-muted">📄 Файл лога</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.source_file) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">📍 Строка</dt>
+                            <dd class="col-sm-7"><small>${eventData.line_number || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">🗄 Таблица</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.table_name) || '-'}</small></dd>
+                        </dl>
+                    </div>
+                </div>
+
+                ${eventData.mssql_error_code ? `
+                <div class="alert alert-danger mt-3 mb-0 py-2">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                    <strong>Код ошибки MSSQL:</strong>
+                    <span class="badge bg-danger ms-2">${eventData.mssql_error_code}</span>
+                    <small class="text-muted ms-2">
+                        ${getMssqlErrorDescription(eventData.mssql_error_code)}
+                    </small>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+
+    const technicalFields = `
+        <div class="card mb-3 additional-fields" style="display: none;">
+            <div class="card-header bg-info text-white">
+                <h6 class="mb-0">🔧 Технические поля</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <dl class="row mb-0">
+                            <dt class="col-sm-5 text-muted">DB PID</dt>
+                            <dd class="col-sm-7"><code>${escapeHtml(eventData.dbpid) || '-'}</code></dd>
+                            <dt class="col-sm-5 text-muted">OS Thread</dt>
+                            <dd class="col-sm-7"><code>${escapeHtml(eventData.osThread) || '-'}</code></dd>
+                            <dt class="col-sm-5 text-muted">Session ID</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.sessionID) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Computer</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.computerName) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Connect ID</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.connectID) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Trans</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.trans) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Func</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.func) || '-'}</small></dd>
+                        </dl>
+                    </div>
+                    <div class="col-md-6">
+                        <dl class="row mb-0">
+                            <dt class="col-sm-5 text-muted">Locks</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.locks) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Wait Connections</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.waitConnections) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Deadlock Intersections</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.deadlockConnectionIntersections) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">lkaid</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.lkaid) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">lka</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.lka) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">lkp</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.lkp) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">lkpid</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.lkpid) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">lksrc</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.lksrc) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Rows</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.rows) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Rows Affected</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.rowsAffected) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Data</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.data) || '-'}</small></dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const textFields = `
+        ${eventData.context ? `
+        <div class="card mb-3">
+            <div class="card-header bg-light">
+                <h6 class="mb-0">📝 Контекст</h6>
+            </div>
+            <div class="card-body">
+                <pre class="bg-light p-3 rounded mb-0" style="max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85em;">${escapeHtml(eventData.context)}</pre>
+            </div>
+        </div>
+        ` : ''}
+        ${eventData.sql ? `
+        <div class="card mb-3">
+            <div class="card-header bg-light">
+                <h6 class="mb-0">🗄 SQL запрос</h6>
+            </div>
+            <div class="card-body">
+                <pre class="bg-light p-3 rounded mb-0" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85em;">${escapeHtml(eventData.sql)}</pre>
+            </div>
+        </div>
+        ` : ''}
+        ${eventData.planSQLText ? `
+        <div class="card mb-3">
+            <div class="card-header bg-light">
+                <h6 class="mb-0">📋 План выполнения SQL</h6>
+            </div>
+            <div class="card-body">
+                <pre class="bg-light p-3 rounded mb-0" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85em;">${escapeHtml(eventData.planSQLText)}</pre>
+            </div>
+        </div>
+        ` : ''}
+        ${eventData.sdbl ? `
+        <div class="card mb-3">
+            <div class="card-header bg-light">
+                <h6 class="mb-0">📊 SDBL запрос</h6>
+            </div>
+            <div class="card-body">
+                <pre class="bg-light p-3 rounded mb-0" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85em;">${escapeHtml(eventData.sdbl)}</pre>
+            </div>
+        </div>
+        ` : ''}
+        ${eventData.exception ? `
+        <div class="card mb-3">
+            <div class="card-header bg-danger text-white">
+                <h6 class="mb-0">⚠️ Исключение</h6>
+            </div>
+            <div class="card-body">
+                <pre class="bg-danger bg-opacity-10 p-3 rounded mb-0" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85em;">${escapeHtml(eventData.exception)}</pre>
+            </div>
+        </div>
+        ` : ''}
+        ${eventData.description ? `
+        <div class="card mb-3">
+            <div class="card-header bg-light">
+                <h6 class="mb-0">📄 Описание</h6>
+            </div>
+            <div class="card-body">
+                <pre class="bg-light p-3 rounded mb-0" style="max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85em;">${escapeHtml(eventData.description)}</pre>
+            </div>
+        </div>
+        ` : ''}
+    `;
+
+    modalBody.innerHTML = toggleButton + basicFields + technicalFields + textFields;
+    const modal = new bootstrap.Modal(document.getElementById('eventModal'));
+    modal.show();
+}
+
+// Функция переключения "Показать все / Скрыть"
+function toggleAllFields(button) {
+    const additionalFields = document.querySelectorAll('.additional-fields');
+    const toggleText = button.querySelector('.toggle-text');
+
+    additionalFields.forEach(field => {
+        if (field.style.display === 'none') {
+            field.style.display = 'block';
+            toggleText.textContent = '📄 Скрыть технические поля';
+            button.classList.remove('btn-outline-primary');
+            button.classList.add('btn-primary');
+        } else {
+            field.style.display = 'none';
+            toggleText.textContent = '📄 Показать все поля';
+            button.classList.remove('btn-primary');
+            button.classList.add('btn-outline-primary');
+        }
+    });
+}
+
+// Описание кодов ошибок MSSQL
+function getMssqlErrorDescription(code) {
+    const descriptions = {
+        1205: 'Deadlock victim — взаимоблокировка, транзакция выбрана жертвой',
+        2627: 'Нарушение уникального ограничения (UNIQUE constraint)',
+        547: 'Нарушение внешнего ключа (FOREIGN KEY constraint)',
+        2601: 'Дублирование ключа (duplicate key)',
+        1222: 'Превышено время ожидания блокировки (lock timeout)',
+        1204: 'Превышено количество ресурсов для блокировок',
+        3960: 'Ошибка сериализации транзакции (snapshot isolation)',
+        18456: 'Ошибка входа (неверный логин/пароль)',
+        4060: 'Не удалось открыть базу данных',
+        4061: 'Не удалось использовать базу данных'
+    };
+    return descriptions[code] || 'Неизвестная ошибка MSSQL';
+}
+
+// Экранирование HTML
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+// Глобальная переменная для данных отчёта
+let reportData = null;
+
+// 🔧 Открытие модального окна отчёта
+async function openReportModal() {
+    const modalBody = document.getElementById('report-modal-body');
+    const modalEl = document.getElementById('reportModal');
+
+    if (!modalEl) return;
+
+    const reportModal = new bootstrap.Modal(modalEl);
+    modalBody.innerHTML = `
+        <div class="text-center py-5">
+            <div class="spinner-border text-success" role="status">
+                <span class="visually-hidden">Загрузка...</span>
+            </div>
+            <p class="mt-3 text-muted">Генерация отчёта...</p>
+        </div>
+    `;
+
+    reportModal.show();
+
+    try {
+        // 🔧 Запрос данных отчёта
+        const response = await fetch(`/api/events/{{ session_id }}/report`);
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        reportData = await response.json();
+        renderReport(reportData);
+
+    } catch (error) {
+        console.error('❌ Ошибка загрузки отчёта:', error);
+        modalBody.innerHTML = `
+            <div class="alert alert-danger">
+                <strong>Ошибка:</strong> ${error.message}
+            </div>
+        `;
+    }
+}
+
+// 🔧 Отрисовка отчёта
+function renderReport(data) {
+    const container = document.getElementById('report-modal-body');
+
+    // Форматирование дат
+    const formatDate = (iso) => iso ? new Date(iso).toLocaleString('ru-RU') : '—';
+    const formatNumber = (n) => new Intl.NumberFormat('ru-RU').format(n || 0);
+    const formatPercent = (p) => p ? `${p.toFixed(1)}%` : '0%';
+
+    // 🔧 Карточки с общей статистикой
+    const summaryCards = `
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card text-center h-100 border-primary">
+                    <div class="card-body">
+                        <h2 class="text-primary mb-0">${formatNumber(data.total_events)}</h2>
+                        <p class="text-muted mb-0">Всего событий</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center h-100 border-info">
+                    <div class="card-body">
+                        <h2 class="text-info mb-0">${formatNumber(data.unique_users)}</h2>
+                        <p class="text-muted mb-0">Уникальных пользователей</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center h-100 border-warning">
+                    <div class="card-body">
+                        <h2 class="text-warning mb-0">${formatNumber(data.unique_directories)}</h2>
+                        <p class="text-muted mb-0">Инфобаз</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center h-100 border-danger">
+                    <div class="card-body">
+                        <h2 class="text-danger mb-0">${formatNumber(data.mssql_errors_count)}</h2>
+                        <p class="text-muted mb-0">Ошибок MS SQL</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // 🔧 Временной диапазон
+    const timeRange = `
+        <div class="card mb-4">
+            <div class="card-header">📅 Временной диапазон</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <dl class="row">
+                            <dt class="col-sm-4 text-muted">Начало</dt>
+                            <dd class="col-sm-8">${formatDate(data.time_range.start)}</dd>
+
+                            <dt class="col-sm-4 text-muted">Конец</dt>
+                            <dd class="col-sm-8">${formatDate(data.time_range.end)}</dd>
+
+                            <dt class="col-sm-4 text-muted">Длительность</dt>
+                            <dd class="col-sm-8">
+                                ${data.duration_seconds ?
+                                    `${Math.floor(data.duration_seconds / 3600)}ч ${Math.floor((data.duration_seconds % 3600) / 60)}м ${Math.floor(data.duration_seconds % 60)}с`
+                                    : '—'}
+                            </dd>
+                        </dl>
+                    </div>
+                    <div class="col-md-6">
+                        <dl class="row">
+                            <dt class="col-sm-4 text-muted">Событий/сек</dt>
+                            <dd class="col-sm-8">
+                                ${data.events_per_second ? data.events_per_second.toFixed(2) : '—'}
+                            </dd>
+
+                            <dt class="col-sm-4 text-muted">Событий/мин</dt>
+                            <dd class="col-sm-8">
+                                ${data.events_per_minute ? data.events_per_minute.toFixed(1) : '—'}
+                            </dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // 🔧 Статистика по типам событий (график + таблица)
+    const eventTypesChart = data.event_types && Object.keys(data.event_types).length > 0 ? `
+        <div class="card mb-4">
+            <div class="card-header">📊 Распределение по типам событий</div>
+            <div class="card-body">
+                <canvas id="event-types-chart" height="150"></canvas>
+            </div>
+        </div>
+    ` : '';
+
+    const eventTypesTable = data.event_types && Object.keys(data.event_types).length > 0 ? `
+        <div class="card mb-4">
+            <div class="card-header">📋 Топ типов событий</div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Тип</th>
+                                <th class="text-end">Количество</th>
+                                <th class="text-end">Доля</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${Object.entries(data.event_types)
+                                .sort((a, b) => b[1] - a[1])
+                                .slice(0, 10)
+                                .map(([type, count]) => {
+                                    const percent = (count / data.total_events) * 100;
+                                    return `
+                                    <tr>
+                                        <td><code>${escapeHtml(type)}</code></td>
+                                        <td class="text-end">${formatNumber(count)}</td>
+                                        <td class="text-end">${formatPercent(percent)}</td>
+                                    </tr>
+                                    `;
+                                }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    ` : '';
+
+    // 🔧 Статистика по длительности
+    const durationStats = `
+        <div class="card mb-4">
+            <div class="card-header">⏱ Статистика длительности</div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <h5 class="text-primary">${data.duration_stats?.min?.toFixed(2) || '—'} мс</h5>
+                        <small class="text-muted">Минимум</small>
+                    </div>
+                    <div class="col-md-3">
+                        <h5 class="text-info">${data.duration_stats?.avg?.toFixed(2) || '—'} мс</h5>
+                        <small class="text-muted">Среднее</small>
+                    </div>
+                    <div class="col-md-3">
+                        <h5 class="text-warning">${data.duration_stats?.median?.toFixed(2) || '—'} мс</h5>
+                        <small class="text-muted">Медиана</small>
+                    </div>
+                    <div class="col-md-3">
+                        <h5 class="text-danger">${data.duration_stats?.max?.toFixed(2) || '—'} мс</h5>
+                        <small class="text-muted">Максимум</small>
+                    </div>
+                </div>
+                ${data.duration_stats?.p95 ? `
+                <div class="row text-center mt-3 pt-3 border-top">
+                    <div class="col-12">
+                        <small class="text-muted">95-й перцентиль:</small>
+                        <strong class="ms-2">${data.duration_stats.p95.toFixed(2)} мс</strong>
+                        <small class="text-muted ms-3">(95% событий быстрее этого значения)</small>
+                    </div>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+
+    // 🔧 Ошибки MS SQL
+    const mssqlErrorsTable = data.mssql_error_codes && data.mssql_error_codes.length > 0 ? `
+        <div class="card mb-4">
+            <div class="card-header bg-danger text-white">⚠️ Ошибки MS SQL</div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Код</th>
+                                <th>Описание</th>
+                                <th class="text-end">Количество</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.mssql_error_codes.map(err => `
+                            <tr>
+                                <td><span class="badge bg-danger">${err.code}</span></td>
+                                <td><small>${getMssqlErrorDescription(err.code)}</small></td>
+                                <td class="text-end">${formatNumber(err.count)}</td>
+                            </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    ` : `
+        <div class="alert alert-success mb-4">
+            ✅ Ошибки MS SQL не обнаружены
+        </div>
+    `;
+
+    // 🔧 Статистика по пользователям
+    const usersTable = data.top_users && data.top_users.length > 0 ? `
+        <div class="card mb-4">
+            <div class="card-header">👥 Топ пользователей</div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Пользователь</th>
+                                <th class="text-end">Событий</th>
+                                <th class="text-end">Доля</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.top_users.map(user => {
+                                const percent = (user.count / data.total_events) * 100;
+                                return `
+                                <tr>
+                                    <td><code>${escapeHtml(user.usr)}</code></td>
+                                    <td class="text-end">${formatNumber(user.count)}</td>
+                                    <td class="text-end">${formatPercent(percent)}</td>
+                                </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    ` : '';
+
+    // 🔧 Сборка всего отчёта
+    let html = `
+        ${summaryCards}
+        ${timeRange}
+        ${eventTypesChart}
+        ${eventTypesTable}
+        ${durationStats}
+        ${mssqlErrorsTable}
+        ${usersTable}
+    `;
+
+    container.innerHTML = html;
+
+    // 🔧 Отрисовка графика если есть данные
+    if (data.event_types && Object.keys(data.event_types).length > 0) {
+        renderEventTypesChart(data.event_types, data.total_events);
+    }
+}
+
+// 🔧 Отрисовка графика типов событий
+function renderEventTypesChart(eventTypes, totalEvents) {
+    const ctx = document.getElementById('event-types-chart')?.getContext('2d');
+    if (!ctx) return;
+
+    // Берём топ-10 типов
+    const entries = Object.entries(eventTypes)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10);
+
+    const labels = entries.map(e => e[0]);
+    const data = entries.map(e => e[1]);
+    const colors = [
+        '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
+        '#FF9F40', '#C9CBCF', '#7C4DFF', '#00BCD4', '#8BC34A'
+    ];
+
+    new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: colors.slice(0, labels.length)
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        boxWidth: 12,
+                        font: { size: 10 }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.parsed || 0;
+                            const percentage = ((value / totalEvents) * 100).toFixed(1);
+                            return `${label}: ${value} (${percentage}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// 🔧 Экспорт отчёта в CSV
+function exportReport() {
+    if (!reportData) return;
+
+    const rows = [
+        ['Метрика', 'Значение'],
+        ['Всего событий', reportData.total_events],
+        ['Уникальных пользователей', reportData.unique_users],
+        ['Инфобаз', reportData.unique_directories],
+        ['Ошибок MS SQL', reportData.mssql_errors_count],
+        ['Начало', reportData.time_range.start],
+        ['Конец', reportData.time_range.end],
+        ['Длительность (сек)', reportData.duration_seconds],
+        ['Событий/сек', reportData.events_per_second?.toFixed(2)],
+        ['Событий/мин', reportData.events_per_minute?.toFixed(1)],
+        ['Мин. длительность (мс)', reportData.duration_stats?.min?.toFixed(2)],
+        ['Сред. длительность (мс)', reportData.duration_stats?.avg?.toFixed(2)],
+        ['Медиана (мс)', reportData.duration_stats?.median?.toFixed(2)],
+        ['Макс. длительность (мс)', reportData.duration_stats?.max?.toFixed(2)],
+        ['P95 (мс)', reportData.duration_stats?.p95?.toFixed(2)],
+        [],
+        ['Тип события', 'Количество', 'Доля (%)'],
+        ...Object.entries(reportData.event_types || {})
+            .sort((a, b) => b[1] - a[1])
+            .map(([type, count]) => [
+                type,
+                count,
+                ((count / reportData.total_events) * 100).toFixed(1)
+            ]),
+        [],
+        ['Код ошибки MS SQL', 'Описание', 'Количество'],
+        ...(reportData.mssql_error_codes || []).map(err => [
+            err.code,
+            getMssqlErrorDescription(err.code),
+            err.count
+        ])
+    ];
+
+    // Генерация CSV
+    const csv = rows.map(row =>
+        row.map(cell => {
+            const val = cell ?? '';
+            return `"${String(val).replace(/"/g, '""')}"`;
+        }).join(',')
+    ).join('\n');
+
+    // Скачивание файла
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `report_${'{{ session_id }}'.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
+
+</script>
+
+<!-- 🔧 Стили для сортировки -->
+<style>
+    th[onclick] {
+        cursor: pointer;
+        user-select: none;
+        transition: background-color 0.2s;
+    }
+    th[onclick]:hover {
+        background-color: rgba(0,0,0,0.05);
+    }
+    .sort-indicator {
+        font-size: 0.8em;
+        opacity: 0.6;
+        transition: opacity 0.2s;
+    }
+    .sort-indicator.text-primary {
+        opacity: 1;
+        font-weight: bold;
+    }
+</style>
+{% endblock %}

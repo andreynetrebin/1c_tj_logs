@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+
+{% block title %}Аналитика ТЖ - Главная{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">Анализ технологических журналов 1С</h1>
+
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Быстрый старт</h5>
+                <p class="card-text">Выберите диапазон дат для анализа логов</p>
+                <a href="/parsing" class="btn btn-primary">Начать парсинг</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h5>Последние сессии парсинга</h5>
+            </div>
+            <div class="card-body">
+                <div id="sessions-list">
+                    <div class="text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Загрузка...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadSessions();
+});
+
+async function loadSessions() {
+    const container = document.getElementById('sessions-list');
+
+    try {
+        // Запрашиваем только 5 последних сессий, отсортированных по start_date
+        const response = await fetch('/api/parsing/sessions?limit=5');
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const sessions = await response.json();
+
+        if (!sessions || sessions.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-4">
+                    <i class="bi bi-inbox fs-1 text-muted d-block mb-3"></i>
+                    <p class="text-muted mb-0">Нет сессий парсинга</p>
+                    <a href="/interval" class="btn btn-primary btn-sm mt-3">
+                        <i class="bi bi-play-circle"></i> Запустить первый парсинг
+                    </a>
+                </div>
+            `;
+            return;
+        }
+
+        // 🔧 Форматирование даты запуска: 16.03.2026
+        function formatLaunchDate(isoString) {
+            if (!isoString) return '—';
+            const date = new Date(isoString);
+            return date.toLocaleDateString('ru-RU', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            });
+        }
+
+        // 🔧 Форматирование времени: 15:50
+        function formatTime(isoString) {
+            if (!isoString) return '—';
+            const date = new Date(isoString);
+            return date.toLocaleTimeString('ru-RU', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        // 🔧 Локализация статусов на русский язык
+        function getStatusText(status) {
+            const statusMap = {
+                'pending': 'Ожидает',
+                'running': 'Выполняется',
+                'completed': 'Завершено',
+                'failed': 'Ошибка'
+            };
+            return statusMap[status] || status;
+        }
+
+        function getStatusColor(status) {
+            const statusColors = {
+                'pending': 'secondary',
+                'running': 'primary',
+                'completed': 'success',
+                'failed': 'danger'
+            };
+            return statusColors[status] || 'secondary';
+        }
+
+        // 🔧 ТАБЛИЧНОЕ ОТОБРАЖЕНИЕ (вместо list-group)
+        let html = `
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 100px;">🆔 Сессия</th>
+                            <th style="width: 180px;">🚀 Запуск</th>
+                            <th style="width: 150px;">📊 Интервал</th>
+                            <th style="width: 100px;">📈 Статус</th>
+                            <th style="width: 100px;" class="text-end">📁 Файлы</th>
+                            <th style="width: 120px;" class="text-end">📊 События</th>
+                            <th style="width: 120px;">⏱ Прогресс</th>
+                            <th style="width: 150px;">🔧 Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        sessions.forEach(session => {
+            // Дата запуска + интервал времени
+            const launchDate = formatLaunchDate(session.start_date);
+            const timeInterval = session.start_date && session.end_date
+                ? `${formatTime(session.start_date)} — ${formatTime(session.end_date)}`
+                : '—';
+
+            // Статус на русском + цвет
+            const statusText = getStatusText(session.status);
+            const statusColor = getStatusColor(session.status);
+            const statusBadge = `<span class="badge bg-${statusColor}">${statusText}</span>`;
+
+            // Прогресс
+            const progress = session.progress_percent || 0;
+            const progressDisplay = session.status === 'running' ? `
+                <div class="progress" style="height: 6px;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated"
+                         style="width: ${progress}%"
+                         role="progressbar"
+                         aria-valuenow="${progress}"
+                         aria-valuemin="0"
+                         aria-valuemax="100">
+                    </div>
+                </div>
+                <small class="text-muted">${progress.toFixed(1)}%</small>
+            ` : `<small class="text-muted">${progress.toFixed(1)}%</small>`;
+
+            // Длительность
+            const durationDisplay = session.elapsed_seconds ?
+                `${Math.floor(session.elapsed_seconds / 60)}м ${Math.floor(session.elapsed_seconds % 60)}с` :
+                '—';
+
+            // Кнопки действий
+            let actions = '';
+            if (session.status === 'completed' && session.total_events > 0) {
+                actions = `
+                    <div class="btn-group btn-group-sm">
+                        <a href="/analysis/${session.session_id}" class="btn btn-outline-success" title="Анализ">📊</a>
+                        <a href="/events/${session.session_id}" class="btn btn-outline-primary" title="События">👁</a>
+                    </div>
+                `;
+            } else if (session.status === 'running') {
+                actions = `
+                    <div class="btn-group btn-group-sm">
+                        <a href="/parsing/progress/${session.session_id}" class="btn btn-outline-primary" title="Прогресс">👁</a>
+                    </div>
+                `;
+            } else if (session.status === 'failed') {
+                actions = `
+                    <button class="btn btn-sm btn-outline-danger" onclick="retrySession('${session.session_id}')" title="Повторить">🔄</button>
+                `;
+            }
+
+            html += `
+                <tr class="${session.status === 'running' ? 'table-info' : ''}" data-session-id="${session.session_id}">
+                    <td><small class="text-monospace">${session.session_id.slice(0, 8)}...</small></td>
+                    <td><small>${launchDate}</small></td>
+                    <td><small class="text-muted">${timeInterval}</small></td>
+                    <td>${statusBadge}</td>
+                    <td class="text-end"><small>${session.processed_files || 0}/${session.total_files || 0}</small></td>
+                    <td class="text-end"><small>${new Intl.NumberFormat('ru-RU').format(session.total_events || 0)}</small></td>
+                    <td>
+                        ${progressDisplay}
+                        ${session.elapsed_seconds ? `<small class="text-muted d-block">${durationDisplay}</small>` : ''}
+                    </td>
+                    <td>${actions}</td>
+                </tr>
+            `;
+        });
+
+        html += `
+                    </tbody>
+                </table>
+            </div>
+            <!-- Ссылка на все сессии -->
+            <div class="text-center mt-3">
+                <a href="/sessions" class="btn btn-outline-secondary btn-sm">
+                    📋 Все сессии парсинга →
+                </a>
+            </div>
+        `;
+
+        container.innerHTML = html;
+
+        // Запустить авто-обновление для running-сессий
+        startAutoUpdate();
+
+    } catch (error) {
+        console.error('❌ Ошибка загрузки сессий:', error);
+        container.innerHTML = `
+            <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle"></i>
+                Не удалось загрузить список сессий
+            </div>
+        `;
+    }
+}
+
+// 🔧 Авто-обновление для running-сессий (каждые 30 сек) — адаптировано для таблицы
+let autoUpdateInterval = null;
+
+function startAutoUpdate() {
+    if (autoUpdateInterval) clearInterval(autoUpdateInterval);
+
+    autoUpdateInterval = setInterval(async () => {
+        // 🔧 Ищем строки таблицы со статусом "Выполняется"
+        const runningRows = document.querySelectorAll('tbody tr[data-session-id]:has(.badge:contains("Выполняется"))');
+
+        if (runningRows.length === 0) return;
+
+        for (const row of runningRows) {
+            const sessionId = row.getAttribute('data-session-id');
+            if (!sessionId) continue;
+
+            try {
+                const response = await fetch(`/api/parsing/progress/${sessionId}`);
+                if (!response.ok) continue;
+
+                const data = await response.json();
+
+                // Обновить прогресс-бар
+                const progressBar = row.querySelector('.progress-bar');
+                if (progressBar && data.progress_percent !== undefined) {
+                    progressBar.style.width = `${data.progress_percent}%`;
+                    progressBar.setAttribute('aria-valuenow', data.progress_percent);
+                }
+
+                // Обновить процент
+                const progressText = row.querySelector('.progress-bar')?.parentElement?.nextElementSibling;
+                if (progressText && data.progress_percent !== undefined) {
+                    progressText.textContent = `${data.progress_percent.toFixed(1)}%`;
+                }
+
+                // Обновить счётчики файлов и событий
+                const cells = row.querySelectorAll('td');
+                if (cells.length >= 6 && data.processed_files !== undefined) {
+                    // Колонка "Файлы" (индекс 4)
+                    cells[4].innerHTML = `<small>${data.processed_files}/${data.total_files}</small>`;
+                    // Колонка "События" (индекс 5)
+                    cells[5].innerHTML = `<small>${new Intl.NumberFormat('ru-RU').format(data.total_events)}</small>`;
+                }
+
+            } catch (e) {
+                console.warn(`Failed to update ${sessionId}:`, e);
+            }
+        }
+    }, 30000);
+}
+
+// 🔧 Повтор сессии
+function retrySession(sessionId) {
+    if (confirm(`Повторить парсинг для сессии ${sessionId.slice(0, 8)}...?\n\nБудут использованы те же параметры интервала.`)) {
+        // Перенаправить на страницу парсинга (параметры нужно получить отдельно)
+        window.location.href = `/parsing/progress/${sessionId}`;
+    }
+}
+
+// Очистить интервал при уходе со страницы
+window.addEventListener('beforeunload', function() {
+    if (autoUpdateInterval) clearInterval(autoUpdateInterval);
+});
+</script>
+{% endblock %}

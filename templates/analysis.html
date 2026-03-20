@@ -1,0 +1,828 @@
+{% extends "base.html" %}
+
+{% block title %}Анализ: {{ session_id[:8] }}... - TJ Log Analyzer{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Заголовок -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2>📊 Анализ сессии</h2>
+            <small class="text-muted">ID: <code>{{ session_id }}</code></small>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="/parsing/progress/{{ session_id }}" class="btn btn-outline-secondary">
+                ← Назад к прогрессу
+            </a>
+            <button class="btn btn-primary" onclick="loadAnalysis()">
+                🔄 Обновить
+            </button>
+        </div>
+    </div>
+
+    <!-- Статус загрузки -->
+    <div id="loading" class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Загрузка...</span>
+        </div>
+        <p class="mt-2">Загрузка аналитики...</p>
+    </div>
+
+    <!-- Контент аналитики (скрыт до загрузки) -->
+    <div id="analysis-content" class="d-none">
+
+        <!-- Сводные карточки -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card text-center h-100">
+                    <div class="card-body">
+                        <h3 class="card-title text-primary mb-0" id="total-events">0</h3>
+                        <p class="card-text text-muted mb-0">Событий</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center h-100">
+                    <div class="card-body">
+                        <h3 class="card-title text-warning mb-0" id="filtered-events">0</h3>
+                        <p class="card-text text-muted mb-0">Отфильтровано</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center h-100">
+                    <div class="card-body">
+                        <h3 class="card-title text-success mb-0" id="filter-percent">0%</h3>
+                        <p class="card-text text-muted mb-0">Эффективность фильтра</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center h-100">
+                    <div class="card-body">
+                        <h3 class="card-title text-info mb-0" id="dir-count">0</h3>
+                        <p class="card-text text-muted mb-0">Инфобаз</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 🔧 Фильтры (упрощённые) -->
+        <div class="card mb-4">
+            <div class="card-header">🔍 Фильтры</div>
+            <div class="card-body">
+                <form id="filter-form" class="row g-3">
+                    <!-- 🔧 Тип события — ВЫПАДАЮЩИЙ СПИСОК -->
+                    <div class="col-md-3">
+                        <label class="form-label">Тип события</label>
+                        <div class="input-group">
+                            <select class="form-select" id="filter-event" name="event_name">
+                                <option value="">Все типы</option>
+                                <!-- Заполняется через JavaScript -->
+                            </select>
+                            <button class="btn btn-outline-secondary" type="button" onclick="loadEventTypes()" title="Обновить список">
+                                🔄
+                            </button>
+                        </div>
+                        <small class="text-muted">Загружается из ClickHouse</small>
+                    </div>
+
+                    <!-- 🔧 Мин. длительность (исправлено) -->
+                    <div class="col-md-3">
+                        <label class="form-label">Мин. длительность (мс)</label>
+                        <input type="number" class="form-control" id="filter-min-dur" name="min_duration_ms" placeholder="0" min="0" step="0.01">
+                        <small class="text-muted">Фильтр по длительности ≥ значения</small>
+                    </div>
+
+                    <!-- 🔧 Макс. длительность (дополнительно) -->
+                    <div class="col-md-3">
+                        <label class="form-label">Макс. длительность (мс)</label>
+                        <input type="number" class="form-control" id="filter-max-dur" name="max_duration_ms" placeholder="∞" min="0" step="0.01">
+                    </div>
+
+                    <!-- Кнопки -->
+                    <div class="col-md-3 d-flex align-items-end gap-2">
+                        <button type="submit" class="btn btn-primary w-100">Применить</button>
+                        <button type="button" class="btn btn-outline-secondary w-100" onclick="resetFilters()">Сброс</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Графики и таблицы -->
+        <div class="row g-4">
+            <!-- 🔧 Временная шкала (по секундам) -->
+            <div class="col-lg-8">
+                <div class="card h-100">
+                    <div class="card-header">📈 Временная шкала (событий в секунду)</div>
+                    <div class="card-body" style="position: relative; min-height: 250px;">
+                        <canvas id="timeline-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Распределение по типам -->
+            <div class="col-lg-4">
+                <div class="card h-100">
+                    <div class="card-header">📊 Типы событий</div>
+                    <div class="card-body" style="position: relative; min-height: 350px;">
+                        <canvas id="event-types-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 🔧 Ошибки MS SQL (вместо "Топ ошибок") -->
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">⚠️ Ошибки MS SQL</div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive" style="max-height: 400px;">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Время</th>
+                                        <th>Событие</th>
+                                        <th>Длительность</th>
+                                        <th>Код ошибки</th>
+                                        <th style="width: 60px;">🔍</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="mssql-errors-table">
+                                    <!-- Заполняется JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="card-footer small text-muted">
+                            Показаны события с <code>mssql_error_code &gt; 0</code>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Топ медленных -->
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">🐌 Топ медленных операций</div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive" style="max-height: 400px;">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Время</th>
+                                        <th>Событие</th>
+                                        <th>Длительность</th>
+                                        <th>Инфобаза</th>
+                                        <th style="width: 60px;">🔍</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="slow-table">
+                                    <!-- Заполняется JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Таблица событий -->
+        <div class="card mt-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>📋 События</span>
+                <div>
+                    <button class="btn btn-sm btn-outline-secondary" id="prev-page" disabled>← Назад</button>
+                    <span class="mx-2" id="page-info">Стр. 1</span>
+                    <button class="btn btn-sm btn-outline-secondary" id="next-page">Вперёд →</button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive" style="max-height: 600px;">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 150px;">⏰ Время</th>
+                                <th>📝 Тип</th>
+                                <th style="width: 80px;">🔢 Уровень</th>
+                                <th style="width: 120px;">⏱ Длительность</th>
+                                <th style="width: 150px;">📁 Инфобаза</th>
+                                <th style="width: 120px;">👤 Пользователь</th>
+                                <th>📄 Контекст</th>
+                                <th style="width: 80px;">🔍</th>
+                            </tr>
+                        </thead>
+                        <tbody id="events-table">
+                            <!-- Заполняется JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- Modal для деталей события -->
+<div class="modal fade" id="eventModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">📋 Детали события</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="event-modal-body">
+                <div class="text-center py-4">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Загрузка...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+/* 🔧 ИСПРАВЛЕНИЕ: Предотвращаем бесконечное растягивание */
+.table-responsive {
+    overflow-x: auto;
+    overflow-y: auto;
+}
+.table-light {
+    position: static;
+    z-index: auto;
+}
+#timeline-chart, #event-types-chart {
+    max-height: 400px;
+}
+.card-body {
+    overflow: hidden;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Глобальные переменные
+const sessionId = '{{ session_id }}';
+let currentPage = 1;
+let currentFilters = {};
+let timelineChart = null;
+let eventTypesChart = null;
+let eventModal = null;
+let eventTypesLoaded = false;
+
+// Инициализация при загрузке
+document.addEventListener('DOMContentLoaded', function() {
+    // Инициализация модального окна
+    const modalEl = document.getElementById('eventModal');
+    if (modalEl) {
+        eventModal = new bootstrap.Modal(modalEl);
+    }
+
+    // 🔧 Загрузка типов событий + аналитики
+    loadEventTypes();
+    loadAnalysis();
+
+    // Обработчик формы фильтров
+    document.getElementById('filter-form')?.addEventListener('submit', function(e) {
+        e.preventDefault();
+        currentPage = 1;
+        loadAnalysis();
+    });
+});
+
+// Сброс фильтров
+function resetFilters() {
+    document.getElementById('filter-event').value = '';
+    document.getElementById('filter-min-dur').value = '';
+    document.getElementById('filter-max-dur').value = '';
+    currentPage = 1;
+    loadAnalysis();
+}
+
+// 🔧 Загрузка типов событий из API
+async function loadEventTypes() {
+    const select = document.getElementById('filter-event');
+    if (!select) return;
+
+    const currentValue = select.value;
+    select.innerHTML = '<option value="">Загрузка...</option>';
+    select.disabled = true;
+
+    try {
+        const response = await fetch(`/api/analysis/${sessionId}/event-types`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const eventTypes = await response.json();
+
+        select.innerHTML = '<option value="">Все типы</option>';
+        eventTypes.forEach(type => {
+            const option = document.createElement('option');
+            option.value = type;
+            option.textContent = type;
+            select.appendChild(option);
+        });
+
+        if (currentValue && eventTypes.includes(currentValue)) {
+            select.value = currentValue;
+        }
+
+        eventTypesLoaded = true;
+        console.log(`✅ Загружено ${eventTypes.length} типов событий`);
+
+    } catch (error) {
+        console.error('❌ Ошибка загрузки типов событий:', error);
+        select.innerHTML = '<option value="">⚠️ Ошибка загрузки</option>';
+    } finally {
+        select.disabled = false;
+    }
+}
+
+// Загрузка аналитики
+async function loadAnalysis() {
+    document.getElementById('loading').classList.remove('d-none');
+    document.getElementById('analysis-content').classList.add('d-none');
+
+    try {
+        // 🔧 Собираем фильтры с правильной обработкой чисел
+        const eventName = document.getElementById('filter-event')?.value || undefined;
+        const minDur = document.getElementById('filter-min-dur')?.value;
+        const maxDur = document.getElementById('filter-max-dur')?.value;
+
+        const params = new URLSearchParams();
+        if (eventName) params.append('event_name', eventName);
+        // 🔧 Исправлено: передаём числа как есть, не через объект
+        if (minDur && !isNaN(parseFloat(minDur))) params.append('min_duration_ms', parseFloat(minDur));
+        if (maxDur && !isNaN(parseFloat(maxDur))) params.append('max_duration_ms', parseFloat(maxDur));
+
+        const response = await fetch(`/api/analysis/${sessionId}?${params}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const data = await response.json();
+        console.log('📊 Получены данные анализа:', data);
+
+        if (data.summary) {
+            renderAnalysis(data.summary);
+        } else {
+            console.error('❌ Нет поля summary в ответе');
+            alert('Ошибка: неправильная структура ответа');
+        }
+
+    } catch (error) {
+        console.error('❌ Ошибка загрузки аналитики:', error);
+        alert('Не удалось загрузить аналитику: ' + error.message);
+    } finally {
+        document.getElementById('loading').classList.add('d-none');
+        document.getElementById('analysis-content').classList.remove('d-none');
+    }
+}
+
+// Отрисовка аналитики
+function renderAnalysis(summary) {
+    // Сводные карточки
+    document.getElementById('total-events').textContent = summary.total_events.toLocaleString('ru-RU');
+    document.getElementById('filtered-events').textContent = summary.total_filtered.toLocaleString('ru-RU');
+    document.getElementById('filter-percent').textContent = summary.filter_percent.toFixed(1) + '%';
+    document.getElementById('dir-count').textContent = summary.directories.length;
+
+    // 🔧 Уничтожаем старые графики перед созданием новых
+    if (timelineChart) {
+        timelineChart.destroy();
+        timelineChart = null;
+    }
+    if (eventTypesChart) {
+        eventTypesChart.destroy();
+        eventTypesChart = null;
+    }
+
+    // Графики
+    renderTimelineChart(summary.timeline);
+    renderEventTypesChart(summary.event_types);
+
+    // 🔧 Ошибки MS SQL (вместо топ ошибок)
+    renderTable('mssql-errors-table', summary.mssql_errors || [],
+        ['timestamp', 'event_name', 'duration_ms', 'mssql_error_code'], true);
+
+    // Топ медленных
+    renderTable('slow-table', summary.top_slow, ['timestamp', 'event_name', 'duration_ms', 'directory_name'], true);
+
+    // Загрузить первую страницу событий
+    loadEventsPage(1);
+}
+
+// 🔧 Отрисовка временной шкалы (ПО СЕКУНДАМ)
+function renderTimelineChart(timeline) {
+    const ctx = document.getElementById('timeline-chart')?.getContext('2d');
+    if (!ctx) return;
+
+    if (!timeline || timeline.length === 0) {
+        ctx.canvas.parentNode.innerHTML = '<p class="text-muted text-center py-4">Нет данных для отображения</p>';
+        return;
+    }
+
+    timelineChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            // 🔧 Форматируем время с секундами
+            labels: timeline.map(p => {
+                const date = new Date(p.timestamp);
+                return date.toLocaleTimeString('ru-RU', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            }),
+            datasets: [{
+                label: 'Событий в секунду',  // 🔧 Исправлено
+                data: timeline.map(p => p.count),
+                borderColor: 'rgb(75, 192, 192)',
+                backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                tension: 0.1,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            aspectRatio: 2,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'Событий в секунду' }  // 🔧 Исправлено
+                },
+                x: {
+                    title: { display: true, text: 'Время (сек)' },
+                    ticks: {
+                        // Показываем не все метки если данных много
+                        maxTicksLimit: 20
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `Событий: ${context.parsed.y}`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Отрисовка распределения по типам
+function renderEventTypesChart(eventTypes) {
+    const ctx = document.getElementById('event-types-chart')?.getContext('2d');
+    if (!ctx) return;
+
+    if (!eventTypes || Object.keys(eventTypes).length === 0) {
+        ctx.canvas.parentNode.innerHTML = '<p class="text-muted text-center py-4">Нет данных для отображения</p>';
+        return;
+    }
+
+    const labels = Object.keys(eventTypes).slice(0, 10);
+    const data = Object.values(eventTypes).slice(0, 10);
+
+    eventTypesChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: [
+                    '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
+                    '#FF9F40', '#C9CBCF', '#7C4DFF', '#00BCD4', '#8BC34A'
+                ]
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            aspectRatio: 1.5,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        boxWidth: 12,
+                        font: { size: 10 }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.parsed || 0;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return `${label}: ${value} (${percentage}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Отрисовка таблицы (универсальная функция)
+function renderTable(tableId, items, columns, enableDetails = false) {
+    const tbody = document.getElementById(tableId);
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+
+    if (!items || items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="' + (columns.length + (enableDetails ? 1 : 0)) + '" class="text-center text-muted py-3">Нет данных</td></tr>';
+        return;
+    }
+
+    items.forEach((item, index) => {
+        const tr = document.createElement('tr');
+
+        // Основные колонки
+        columns.forEach(col => {
+            const td = document.createElement('td');
+            let value = item[col];
+
+            if (col === 'duration_ms' && typeof value === 'number') {
+                value = value.toFixed(2) + ' мс';
+            } else if (col === 'timestamp' && value) {
+                value = new Date(value).toLocaleTimeString('ru-RU');
+            } else if (col === 'mssql_error_code' && value) {
+                // 🔧 Специальное форматирование для кода ошибки
+                value = `<span class="badge bg-danger" title="${getMssqlErrorDescription(value)}">⚠️ ${value}</span>`;
+                td.innerHTML = value;
+                tr.appendChild(td);
+                return;
+            } else if (typeof value === 'string') {
+                value = escapeHtml(value);
+            }
+
+            td.textContent = value || '-';
+            tr.appendChild(td);
+        });
+
+        // 🔧 Кнопка просмотра деталей (если включено)
+        if (enableDetails) {
+            const actionTd = document.createElement('td');
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm btn-outline-primary';
+            btn.innerHTML = '🔍';
+            btn.title = 'Показать детали';
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                showSlowEventDetail(item, index);
+            };
+            actionTd.appendChild(btn);
+            tr.appendChild(actionTd);
+        }
+
+        tbody.appendChild(tr);
+    });
+}
+
+// Показать детали события из топ медленных/ошибок
+function showSlowEventDetail(eventData, index) {
+    if (!eventModal) {
+        const modalEl = document.getElementById('eventModal');
+        if (modalEl) {
+            eventModal = new bootstrap.Modal(modalEl);
+        } else {
+            alert('Ошибка: модальное окно не найдено');
+            return;
+        }
+    }
+
+    const modalBody = document.getElementById('event-modal-body');
+    modalBody.innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Загрузка...</span>
+            </div>
+            <p class="mt-2">Загрузка деталей...</p>
+        </div>
+    `;
+
+    eventModal.show();
+    renderEventDetail(eventData);
+}
+
+// Отрисовка деталей события (общая функция)
+function renderEventDetail(event) {
+    const modalBody = document.getElementById('event-modal-body');
+
+    const formatValue = (value) => {
+        if (value === null || value === undefined || value === '') return '-';
+        if (typeof value === 'object') return JSON.stringify(value, null, 2);
+        if (typeof value === 'number') return value.toLocaleString('ru-RU');
+        return escapeHtml(String(value));
+    };
+
+    const fieldGroups = [
+        {
+            title: '📋 Основная информация',
+            fields: [
+                { key: 'timestamp', label: 'Время', format: (v) => v ? new Date(v).toLocaleString('ru-RU') : '-' },
+                { key: 'event_name', label: 'Тип события' },
+                { key: 'level', label: 'Уровень' },
+                { key: 'duration_ms', label: 'Длительность', format: (v) => v ? `${v.toFixed(2)} мс` : '-' },
+                { key: 'severity', label: 'Severity' },
+                { key: 'category', label: 'Категория' }
+            ]
+        },
+        {
+            title: '🖥 Контекст выполнения',
+            fields: [
+                { key: 'directory_name', label: 'Инфобаза' },
+                { key: 'source_file', label: 'Файл лога' },
+                { key: 'line_number', label: 'Строка в файле' },
+                { key: 'process_name', label: 'Процесс' },
+                { key: 'user_name', label: 'Пользователь' },
+                { key: 'table_name', label: 'Таблица' }
+            ]
+        }
+    ];
+
+    let html = '';
+
+    fieldGroups.forEach(group => {
+        const hasData = group.fields.some(f => event[f.key]);
+        if (!hasData) return;
+
+        html += `<h6 class="mt-4 mb-3 text-primary">${group.title}</h6>`;
+        html += '<dl class="row">';
+
+        group.fields.forEach(field => {
+            const value = event[field.key];
+            if (value === null || value === undefined || value === '') return;
+
+            const displayValue = field.format ? field.format(value) : formatValue(value);
+
+            html += `
+                <dt class="col-sm-4 text-muted">${field.label}</dt>
+                <dd class="col-sm-8">
+                    <pre class="bg-light p-2 rounded mb-0" style="white-space: pre-wrap; word-break: break-word;">${displayValue}</pre>
+                </dd>
+            `;
+        });
+
+        html += '</dl>';
+    });
+
+    // 🔧 Блок ошибки MSSQL (если есть)
+    if (event.mssql_error_code) {
+        html += `
+            <div class="alert alert-danger mt-3">
+                <h6 class="mb-2">⚠️ Ошибка MS SQL</h6>
+                <p class="mb-1"><strong>Код:</strong> <span class="badge bg-danger">${event.mssql_error_code}</span></p>
+                <p class="mb-0 small text-muted">${getMssqlErrorDescription(event.mssql_error_code)}</p>
+            </div>
+        `;
+    }
+
+    // Большие текстовые поля
+    const largeFields = [
+        { key: 'context', label: '📝 Контекст', class: 'bg-light' },
+        { key: 'sql', label: '🗄 SQL запрос', class: 'bg-light' },
+        { key: 'sdbl', label: '📊 SDBL', class: 'bg-light' },
+        { key: 'exception', label: '⚠️ Исключение', class: 'bg-danger bg-opacity-10' }
+    ];
+
+    largeFields.forEach(field => {
+        const value = event[field.key];
+        if (!value || value === '-') return;
+
+        html += `
+            <div class="mt-4">
+                <h6 class="mb-2">${field.label}</h6>
+                <pre class="${field.class} p-3 rounded" style="max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.9em;">${escapeHtml(value)}</pre>
+            </div>
+        `;
+    });
+
+    modalBody.innerHTML = html;
+}
+
+// 🔧 Описание кодов ошибок MSSQL
+function getMssqlErrorDescription(code) {
+    const descriptions = {
+        1205: 'Deadlock victim — взаимоблокировка',
+        2627: 'Нарушение UNIQUE constraint',
+        547: 'Нарушение FOREIGN KEY',
+        2601: 'Дублирование ключа',
+        1222: 'Превышено время ожидания блокировки',
+        18456: 'Ошибка входа (неверный логин/пароль)',
+        4060: 'Не удалось открыть базу данных',
+        208: 'Неверное имя объекта',
+        207: 'Неверное имя столбца',
+        102: 'Синтаксическая ошибка SQL'
+    };
+    return descriptions[code] || 'Неизвестная ошибка MSSQL';
+}
+
+// Загрузка страницы событий
+async function loadEventsPage(page) {
+    currentPage = page;
+
+    try {
+        const eventName = document.getElementById('filter-event')?.value || undefined;
+        const minDur = document.getElementById('filter-min-dur')?.value;
+        const maxDur = document.getElementById('filter-max-dur')?.value;
+
+        const params = new URLSearchParams({
+            page: page,
+            page_size: 50
+        });
+
+        if (eventName) params.append('event_name', eventName);
+        if (minDur && !isNaN(parseFloat(minDur))) params.append('min_duration_ms', parseFloat(minDur));
+        if (maxDur && !isNaN(parseFloat(maxDur))) params.append('max_duration_ms', parseFloat(maxDur));
+
+        const response = await fetch(`/api/analysis/${sessionId}/events?${params}`);
+        const data = await response.json();
+
+        renderEventsTable(data.events);
+        updatePagination(data.page, data.total_pages, data.total);
+
+    } catch (error) {
+        console.error('Ошибка загрузки событий:', error);
+    }
+}
+
+// Отрисовка таблицы событий
+function renderEventsTable(events) {
+    const tbody = document.getElementById('events-table');
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+
+    if (!events || events.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">События не найдены</td></tr>';
+        return;
+    }
+
+    events.forEach((event, index) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><small class="text-muted">${new Date(event.timestamp).toLocaleString('ru-RU')}</small></td>
+            <td><span class="badge bg-secondary">${escapeHtml(event.event_name)}</span></td>
+            <td><span class="badge bg-info text-dark">${event.level}</span></td>
+            <td><code>${event.duration_ms?.toFixed(2) || '-'} мс</code></td>
+            <td><small>${escapeHtml(event.directory_name || '-')}</small></td>
+            <td><small>${escapeHtml(event.usr || '-')}</small></td>
+            <td><small class="text-muted text-truncate" style="max-width: 200px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(event.context?.substring(0, 100) || '-')}</small></td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="showEventDetailFromAnalysis(this)"
+                        data-event='${JSON.stringify(event).replace(/'/g, "&apos;")}'
+                        title="Показать детали">
+                    🔍
+                </button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+// Показать детали события из анализа
+function showEventDetailFromAnalysis(button) {
+    if (!eventModal) {
+        const modalEl = document.getElementById('eventModal');
+        if (modalEl) {
+            eventModal = new bootstrap.Modal(modalEl);
+        } else {
+            alert('Ошибка: модальное окно не найдено');
+            return;
+        }
+    }
+
+    const eventData = JSON.parse(button.getAttribute('data-event'));
+    const modalBody = document.getElementById('event-modal-body');
+
+    modalBody.innerHTML = `<div class="text-center py-4"><div class="spinner-border" role="status"></div></div>`;
+    eventModal.show();
+    renderEventDetail(eventData);
+}
+
+// Обновление пагинации
+function updatePagination(page, totalPages, total) {
+    const pageInfo = document.getElementById('page-info');
+    const prevBtn = document.getElementById('prev-page');
+    const nextBtn = document.getElementById('next-page');
+
+    if (pageInfo) pageInfo.textContent = `Стр. ${page} из ${totalPages} (${total.toLocaleString('ru-RU')})`;
+    if (prevBtn) prevBtn.disabled = page <= 1;
+    if (nextBtn) nextBtn.disabled = page >= totalPages;
+}
+
+// Экранирование HTML
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}
