@@ -33,6 +33,41 @@
 </div>
 {% endblock %}
 
+{% block extra_css %}
+<style>
+    /* 🔧 Курсор-рука для кликабельных строк */
+    tbody tr.clickable-row {
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+    }
+
+    /* Подсветка при наведении (кроме running-сессий) */
+    tbody tr.clickable-row:hover:not(.table-info) {
+        background-color: rgba(0, 123, 255, 0.08) !important;
+    }
+
+    /* Исключаем интерактивные элементы из клика по строке */
+    tbody tr.clickable-row .btn,
+    tbody tr.clickable-row .btn-group,
+    tbody tr.clickable-row a:not([data-href]),
+    tbody tr.clickable-row button {
+        cursor: default;
+    }
+
+    /* Визуальный индикатор для ID сессии */
+    tbody tr.clickable-row td:first-child {
+        color: #0d6efd;
+        font-weight: 500;
+        text-decoration: none;
+    }
+
+    /* Подсветка при наведении на ID */
+    tbody tr.clickable-row:hover td:first-child {
+        text-decoration: underline;
+    }
+</style>
+{% endblock %}
+
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -43,7 +78,6 @@ async function loadSessions() {
     const container = document.getElementById('sessions-list');
 
     try {
-        // Запрашиваем только 5 последних сессий, отсортированных по start_date
         const response = await fetch('/api/parsing/sessions?limit=5');
 
         if (!response.ok) {
@@ -65,7 +99,7 @@ async function loadSessions() {
             return;
         }
 
-        // 🔧 Форматирование даты запуска: 16.03.2026
+        // Форматирование даты: 16.03.2026
         function formatLaunchDate(isoString) {
             if (!isoString) return '—';
             const date = new Date(isoString);
@@ -76,7 +110,7 @@ async function loadSessions() {
             });
         }
 
-        // 🔧 Форматирование времени: 15:50
+        // Форматирование времени: 15:50
         function formatTime(isoString) {
             if (!isoString) return '—';
             const date = new Date(isoString);
@@ -86,7 +120,7 @@ async function loadSessions() {
             });
         }
 
-        // 🔧 Локализация статусов на русский язык
+        // Локализация статусов
         function getStatusText(status) {
             const statusMap = {
                 'pending': 'Ожидает',
@@ -107,7 +141,7 @@ async function loadSessions() {
             return statusColors[status] || 'secondary';
         }
 
-        // 🔧 ТАБЛИЧНОЕ ОТОБРАЖЕНИЕ (вместо list-group)
+        // Генерация таблицы
         let html = `
             <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
@@ -127,18 +161,15 @@ async function loadSessions() {
         `;
 
         sessions.forEach(session => {
-            // Дата запуска + интервал времени
             const launchDate = formatLaunchDate(session.start_date);
             const timeInterval = session.start_date && session.end_date
                 ? `${formatTime(session.start_date)} — ${formatTime(session.end_date)}`
                 : '—';
 
-            // Статус на русском + цвет
             const statusText = getStatusText(session.status);
             const statusColor = getStatusColor(session.status);
             const statusBadge = `<span class="badge bg-${statusColor}">${statusText}</span>`;
 
-            // Прогресс
             const progress = session.progress_percent || 0;
             const progressDisplay = session.status === 'running' ? `
                 <div class="progress" style="height: 6px;">
@@ -153,7 +184,6 @@ async function loadSessions() {
                 <small class="text-muted">${progress.toFixed(1)}%</small>
             ` : `<small class="text-muted">${progress.toFixed(1)}%</small>`;
 
-            // Длительность
             const durationDisplay = session.elapsed_seconds ?
                 `${Math.floor(session.elapsed_seconds / 60)}м ${Math.floor(session.elapsed_seconds % 60)}с` :
                 '—';
@@ -162,25 +192,29 @@ async function loadSessions() {
             let actions = '';
             if (session.status === 'completed' && session.total_events > 0) {
                 actions = `
-                    <div class="btn-group btn-group-sm">
+                    <div class="btn-group btn-group-sm" onclick="event.stopPropagation()">
                         <a href="/analysis/${session.session_id}" class="btn btn-outline-success" title="Анализ">📊</a>
                         <a href="/events/${session.session_id}" class="btn btn-outline-primary" title="События">👁</a>
                     </div>
                 `;
             } else if (session.status === 'running') {
                 actions = `
-                    <div class="btn-group btn-group-sm">
+                    <div class="btn-group btn-group-sm" onclick="event.stopPropagation()">
                         <a href="/parsing/progress/${session.session_id}" class="btn btn-outline-primary" title="Прогресс">👁</a>
                     </div>
                 `;
             } else if (session.status === 'failed') {
                 actions = `
-                    <button class="btn btn-sm btn-outline-danger" onclick="retrySession('${session.session_id}')" title="Повторить">🔄</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); retrySession('${session.session_id}')" title="Повторить">🔄</button>
                 `;
             }
 
+            // 🔧 КЛИКАБЕЛЬНАЯ СТРОКА: data-href и класс clickable-row
             html += `
-                <tr class="${session.status === 'running' ? 'table-info' : ''}" data-session-id="${session.session_id}">
+                <tr class="clickable-row ${session.status === 'running' ? 'table-info' : ''}"
+                    data-session-id="${session.session_id}"
+                    data-href="/events/${session.session_id}"
+                    title="👁 Открыть просмотр событий">
                     <td><small class="text-monospace">${session.session_id.slice(0, 8)}...</small></td>
                     <td><small>${launchDate}</small></td>
                     <td><small class="text-muted">${timeInterval}</small></td>
@@ -191,7 +225,7 @@ async function loadSessions() {
                         ${progressDisplay}
                         ${session.elapsed_seconds ? `<small class="text-muted d-block">${durationDisplay}</small>` : ''}
                     </td>
-                    <td>${actions}</td>
+                    <td onclick="event.stopPropagation()">${actions}</td>
                 </tr>
             `;
         });
@@ -200,7 +234,6 @@ async function loadSessions() {
                     </tbody>
                 </table>
             </div>
-            <!-- Ссылка на все сессии -->
             <div class="text-center mt-3">
                 <a href="/sessions" class="btn btn-outline-secondary btn-sm">
                     📋 Все сессии парсинга →
@@ -209,6 +242,26 @@ async function loadSessions() {
         `;
 
         container.innerHTML = html;
+
+        // 🔧 ОБРАБОТЧИК КЛИКА ПО СТРОКЕ
+        container.querySelectorAll('tr.clickable-row').forEach(row => {
+            row.addEventListener('click', function(e) {
+                // Игнорируем клики по кнопкам, ссылкам и интерактивным элементам
+                if (e.target.closest('.btn, .btn-group, button, input, select, textarea')) {
+                    return;
+                }
+
+                const href = this.getAttribute('data-href');
+                if (href) {
+                    // Открываем в новой вкладке если зажата Ctrl/Cmd
+                    if (e.ctrlKey || e.metaKey || e.button === 1) {
+                        window.open(href, '_blank');
+                    } else {
+                        window.location.href = href;
+                    }
+                }
+            });
+        });
 
         // Запустить авто-обновление для running-сессий
         startAutoUpdate();
@@ -224,15 +277,14 @@ async function loadSessions() {
     }
 }
 
-// 🔧 Авто-обновление для running-сессий (каждые 30 сек) — адаптировано для таблицы
+// Авто-обновление для running-сессий
 let autoUpdateInterval = null;
 
 function startAutoUpdate() {
     if (autoUpdateInterval) clearInterval(autoUpdateInterval);
 
     autoUpdateInterval = setInterval(async () => {
-        // 🔧 Ищем строки таблицы со статусом "Выполняется"
-        const runningRows = document.querySelectorAll('tbody tr[data-session-id]:has(.badge:contains("Выполняется"))');
+        const runningRows = document.querySelectorAll('tbody tr.clickable-row.table-info');
 
         if (runningRows.length === 0) return;
 
@@ -259,12 +311,10 @@ function startAutoUpdate() {
                     progressText.textContent = `${data.progress_percent.toFixed(1)}%`;
                 }
 
-                // Обновить счётчики файлов и событий
+                // Обновить счётчики
                 const cells = row.querySelectorAll('td');
                 if (cells.length >= 6 && data.processed_files !== undefined) {
-                    // Колонка "Файлы" (индекс 4)
                     cells[4].innerHTML = `<small>${data.processed_files}/${data.total_files}</small>`;
-                    // Колонка "События" (индекс 5)
                     cells[5].innerHTML = `<small>${new Intl.NumberFormat('ru-RU').format(data.total_events)}</small>`;
                 }
 
@@ -275,15 +325,14 @@ function startAutoUpdate() {
     }, 30000);
 }
 
-// 🔧 Повтор сессии
+// Повтор сессии
 function retrySession(sessionId) {
     if (confirm(`Повторить парсинг для сессии ${sessionId.slice(0, 8)}...?\n\nБудут использованы те же параметры интервала.`)) {
-        // Перенаправить на страницу парсинга (параметры нужно получить отдельно)
         window.location.href = `/parsing/progress/${sessionId}`;
     }
 }
 
-// Очистить интервал при уходе со страницы
+// Очистка интервала при уходе со страницы
 window.addEventListener('beforeunload', function() {
     if (autoUpdateInterval) clearInterval(autoUpdateInterval);
 });

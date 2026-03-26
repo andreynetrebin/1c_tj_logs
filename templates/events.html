@@ -1,7 +1,5 @@
 {% extends "base.html" %}
-
 {% block title %}События - {{ session_id }}{% endblock %}
-
 {% block content %}
 <!-- Заголовок с кнопками -->
 <div class="row mb-4">
@@ -12,17 +10,21 @@
                 <p class="text-muted mb-0">Сессия: <code>{{ session_id }}</code></p>
             </div>
             <div class="d-flex gap-2">
-                <!-- 🔧 НОВАЯ КНОПКА: Отчет -->
-                <button class="btn btn-success" onclick="openReportModal()">
-                    📈 Отчет
-                </button>
-                <a href="/analysis/{{ session_id }}" class="btn btn-secondary">
-                    ← Назад к анализу
-                </a>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-success" onclick="exportEvents('csv')" title="Экспорт в CSV">
+                        📥 CSV
+                    </button>
+                    <button type="button" class="btn btn-success" onclick="exportEvents('xlsx')" title="Экспорт в XLSX">
+                        📥 XLSX
+                    </button>
+                </div>
+                <button class="btn btn-success" onclick="openReportModal()">📈 Отчет</button>
+                <a href="/analysis/{{ session_id }}" class="btn btn-secondary">← Назад к анализу</a>
             </div>
         </div>
     </div>
 </div>
+
 <!-- Форма поиска и фильтров -->
 <div class="row mb-4">
     <div class="col-12">
@@ -30,6 +32,21 @@
             <div class="card-header">🔍 Поиск и фильтры</div>
             <div class="card-body">
                 <form id="filter-form" class="row g-3">
+
+                    <!-- 🔧 НОВЫЕ ПОЛЯ: Диапазон времени -->
+                    <div class="col-md-3">
+                        <label class="form-label">⏰ Время от</label>
+                        <input type="text" class="form-control form-control-sm" id="filter-time-from"
+                               placeholder="2026-03-20 10:30:45.123"
+                               title="Формат: ГГГГ-ММ-ДД ЧЧ:ММ:СС.ммм">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">⏰ Время до</label>
+                        <input type="text" class="form-control form-control-sm" id="filter-time-to"
+                               placeholder="2026-03-20 11:45:30.999"
+                               title="Формат: ГГГГ-ММ-ДД ЧЧ:ММ:СС.ммм">
+                    </div>
+
                     <!-- Тип события -->
                     <div class="col-md-2">
                         <label class="form-label">Тип события</label>
@@ -37,12 +54,9 @@
                             <select class="form-select" id="filter-event-name" name="event_name">
                                 <option value="">Все типы</option>
                             </select>
-                            <button class="btn btn-outline-secondary" type="button" onclick="loadEventTypes()" title="Обновить список">
-                                🔄
-                            </button>
+                            <button class="btn btn-outline-secondary" type="button" onclick="loadEventTypes()" title="Обновить список">🔄</button>
                         </div>
                     </div>
-
                     <!-- Пользователь -->
                     <div class="col-md-2">
                         <label class="form-label">Пользователь</label>
@@ -50,12 +64,9 @@
                             <select class="form-select" id="filter-user" name="user">
                                 <option value="">Все пользователи</option>
                             </select>
-                            <button class="btn btn-outline-secondary" type="button" onclick="loadUsers()" title="Обновить список">
-                                🔄
-                            </button>
+                            <button class="btn btn-outline-secondary" type="button" onclick="loadUsers()" title="Обновить список">🔄</button>
                         </div>
                     </div>
-
                     <!-- Ошибка MSSQL -->
                     <div class="col-md-3">
                         <label class="form-label">Ошибка MSSQL</label>
@@ -63,36 +74,33 @@
                             <select class="form-select" id="filter-mssql-error">
                                 <option value="">Все ошибки</option>
                             </select>
-                            <button class="btn btn-outline-secondary" type="button" onclick="loadMssqlErrors()" title="Обновить список">
-                                🔄
-                            </button>
+                            <button class="btn btn-outline-secondary" type="button" onclick="loadMssqlErrors()" title="Обновить список">🔄</button>
                         </div>
                     </div>
-
                     <!-- Мин. длительность -->
                     <div class="col-md-2">
                         <label class="form-label">Мин. длительность (мс)</label>
                         <input type="number" class="form-control" id="filter-min-dur" name="min_duration_ms" placeholder="0" min="0" step="0.01">
                     </div>
-
                     <!-- Макс. длительность -->
                     <div class="col-md-2">
                         <label class="form-label">Макс. длительность (мс)</label>
                         <input type="number" class="form-control" id="filter-max-dur" name="max_duration_ms" placeholder="∞" min="0" step="0.01">
                     </div>
-
                     <!-- Поиск по тексту -->
                     <div class="col-md-4">
                         <label class="form-label">Поиск по тексту</label>
                         <input type="text" class="form-control" id="filter-search" placeholder="SQL, exception, context...">
                     </div>
-
                     <!-- Кнопки -->
                     <div class="col-md-2 d-flex align-items-end gap-2">
                         <button type="submit" class="btn btn-primary">🔍 Найти</button>
                         <button type="button" class="btn btn-outline-secondary" onclick="resetFilters()">Сброс</button>
                     </div>
                 </form>
+                <small class="text-muted mt-2 d-block">
+                    💡 Формат времени: <code>2026-03-20 10:30:45.123</code> (год-месяц-день часы:минуты:секунды.миллисекунды)
+                </small>
             </div>
         </div>
     </div>
@@ -115,7 +123,6 @@
                         <p class="mt-2 text-muted">Загрузка событий...</p>
                     </div>
                 </div>
-
                 <!-- Пагинация -->
                 <nav class="mt-3" id="pagination" style="display: none;">
                     <ul class="pagination justify-content-center mb-0">
@@ -156,7 +163,8 @@
         </div>
     </div>
 </div>
-<!-- 🔧 Modal для отчёта по сессии -->
+
+<!-- Modal для отчёта -->
 <div class="modal fade" id="reportModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
@@ -174,14 +182,11 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
-                <button type="button" class="btn btn-outline-primary" onclick="exportReport()">
-                    💾 Экспорт CSV
-                </button>
+                <button type="button" class="btn btn-outline-primary" onclick="exportReport()">💾 Экспорт CSV</button>
             </div>
         </div>
     </div>
 </div>
-
 {% endblock %}
 
 {% block extra_js %}
@@ -195,30 +200,45 @@ let eventTypesLoaded = false;
 let usersLoaded = false;
 let mssqlErrorsLoaded = false;
 
-// 🔧 Состояние сортировки
+// Состояние сортировки
 let currentSort = {
-    column: 'timestamp',      // По умолчанию сортировка по времени
-    order: 'desc'             // По умолчанию: новые сверху
+    column: 'timestamp',
+    order: 'desc'
 };
 
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', function() {
-    // Инициализация модального окна
     const modalEl = document.getElementById('eventModal');
     if (modalEl) {
         eventModal = new bootstrap.Modal(modalEl);
     }
 
-    // Загрузка всех списков для фильтров + событий
+    // 🔧 Инициализация полей времени
+    const timeFromField = document.getElementById('filter-time-from');
+    const timeToField = document.getElementById('filter-time-to');
+
+    if (timeFromField) {
+        timeFromField.dataset.userEdited = 'false';
+        timeFromField.addEventListener('input', function() {
+            this.dataset.userEdited = 'true';
+        });
+    }
+
+    if (timeToField) {
+        timeToField.dataset.userEdited = 'false';
+        timeToField.addEventListener('input', function() {
+            this.dataset.userEdited = 'true';
+        });
+    }
+
     loadEventTypes();
     loadUsers();
     loadMssqlErrors();
     loadEvents();
 
-    // Обработчик формы фильтров
     document.getElementById('filter-form').addEventListener('submit', function(e) {
         e.preventDefault();
-        currentPage = 1;  // Сброс на первую страницу при новом поиске
+        currentPage = 1;
         loadEvents();
     });
 });
@@ -231,40 +251,41 @@ function resetFilters() {
     document.getElementById('filter-min-dur').value = '';
     document.getElementById('filter-max-dur').value = '';
     document.getElementById('filter-search').value = '';
+
+    const timeFromField = document.getElementById('filter-time-from');
+    const timeToField = document.getElementById('filter-time-to');
+    if (timeFromField) {
+        timeFromField.value = '';
+        timeFromField.dataset.userEdited = 'false';
+    }
+    if (timeToField) {
+        timeToField.value = '';
+        timeToField.dataset.userEdited = 'false';
+    }
+
     currentPage = 1;
     loadEvents();
 }
 
-// 🔧 Переключение сортировки по колонке
+// Переключение сортировки
 function toggleSort(column) {
-    // Если кликнули по той же колонке — меняем порядок
     if (currentSort.column === column) {
         currentSort.order = currentSort.order === 'asc' ? 'desc' : 'asc';
     } else {
-        // Новая колонка — по умолчанию сортировка по убыванию
         currentSort.column = column;
         currentSort.order = 'desc';
     }
-
-    // Сброс на первую страницу при смене сортировки
     currentPage = 1;
-
-    // Перезагрузить события с новой сортировкой
     loadEvents();
-
-    // Обновить визуальные индикаторы
     updateSortIndicators();
 }
 
-// 🔧 Обновление визуальных индикаторов сортировки (▲/▼)
+// Обновление индикаторов сортировки
 function updateSortIndicators() {
-    // Убрать все индикаторы
     document.querySelectorAll('.sort-indicator').forEach(el => {
         el.textContent = '';
         el.classList.remove('text-primary');
     });
-
-    // Добавить индикатор к активной колонке
     const header = document.getElementById(`header-${currentSort.column}`);
     if (header) {
         const indicator = header.querySelector('.sort-indicator');
@@ -275,11 +296,10 @@ function updateSortIndicators() {
     }
 }
 
-// Загрузка типов событий из API
+// Загрузка типов событий
 async function loadEventTypes() {
     const select = document.getElementById('filter-event-name');
     if (!select) return;
-
     const currentValue = select.value;
     select.innerHTML = '<option value="">Загрузка...</option>';
     select.disabled = true;
@@ -287,11 +307,8 @@ async function loadEventTypes() {
     try {
         const sessionId = '{{ session_id }}';
         const response = await fetch(`/api/events/event-types?session_id=${sessionId}`);
-
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
         const eventTypes = await response.json();
-
         select.innerHTML = '<option value="">Все типы</option>';
         eventTypes.forEach(type => {
             const option = document.createElement('option');
@@ -299,14 +316,10 @@ async function loadEventTypes() {
             option.textContent = type;
             select.appendChild(option);
         });
-
         if (currentValue && eventTypes.includes(currentValue)) {
             select.value = currentValue;
         }
-
         eventTypesLoaded = true;
-        console.log(`✅ Загружено ${eventTypes.length} типов событий`);
-
     } catch (error) {
         console.error('❌ Ошибка загрузки типов событий:', error);
         select.innerHTML = '<option value="">⚠️ Ошибка загрузки</option>';
@@ -315,11 +328,10 @@ async function loadEventTypes() {
     }
 }
 
-// Загрузка пользователей из API
+// Загрузка пользователей
 async function loadUsers() {
     const select = document.getElementById('filter-user');
     if (!select) return;
-
     const currentValue = select.value;
     select.innerHTML = '<option value="">Загрузка...</option>';
     select.disabled = true;
@@ -327,11 +339,8 @@ async function loadUsers() {
     try {
         const sessionId = '{{ session_id }}';
         const response = await fetch(`/api/events/users?session_id=${sessionId}`);
-
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
         const users = await response.json();
-
         select.innerHTML = '<option value="">Все пользователи</option>';
         users.forEach(user => {
             const option = document.createElement('option');
@@ -339,14 +348,10 @@ async function loadUsers() {
             option.textContent = user;
             select.appendChild(option);
         });
-
         if (currentValue && users.includes(currentValue)) {
             select.value = currentValue;
         }
-
         usersLoaded = true;
-        console.log(`✅ Загружено ${users.length} пользователей`);
-
     } catch (error) {
         console.error('❌ Ошибка загрузки пользователей:', error);
         select.innerHTML = '<option value="">⚠️ Ошибка загрузки</option>';
@@ -355,11 +360,10 @@ async function loadUsers() {
     }
 }
 
-// Загрузка кодов ошибок MSSQL из API
+// Загрузка ошибок MSSQL
 async function loadMssqlErrors() {
     const select = document.getElementById('filter-mssql-error');
     if (!select) return;
-
     const currentValue = select.value;
     select.innerHTML = '<option value="">Загрузка...</option>';
     select.disabled = true;
@@ -367,11 +371,8 @@ async function loadMssqlErrors() {
     try {
         const sessionId = '{{ session_id }}';
         const response = await fetch(`/api/events/mssql-errors?session_id=${sessionId}`);
-
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
         const errors = await response.json();
-
         select.innerHTML = '<option value="">Все ошибки</option>';
         errors.forEach(err => {
             const option = document.createElement('option');
@@ -379,14 +380,10 @@ async function loadMssqlErrors() {
             option.textContent = err.label;
             select.appendChild(option);
         });
-
         if (currentValue && errors.some(e => e.code == currentValue)) {
             select.value = currentValue;
         }
-
         mssqlErrorsLoaded = true;
-        console.log(`✅ Загружено ${errors.length} кодов ошибок MSSQL`);
-
     } catch (error) {
         console.error('❌ Ошибка загрузки ошибок MSSQL:', error);
         select.innerHTML = '<option value="">⚠️ Ошибка загрузки</option>';
@@ -395,7 +392,7 @@ async function loadMssqlErrors() {
     }
 }
 
-// Загрузка событий с сервера
+// 🔧 Загрузка событий с сервера
 async function loadEvents() {
     const container = document.getElementById('events-table');
     container.innerHTML = `
@@ -413,42 +410,66 @@ async function loadEvents() {
     const mssqlError = document.getElementById('filter-mssql-error').value;
     const minDur = document.getElementById('filter-min-dur').value;
     const maxDur = document.getElementById('filter-max-dur').value;
+    const timeFrom = document.getElementById('filter-time-from')?.value.trim() || '';
+    const timeTo = document.getElementById('filter-time-to')?.value.trim() || '';
 
-    // Формируем URL с параметрами
     let url = `/api/events/{{ session_id }}?page=${currentPage}&page_size=${pageSize}`;
-
     if (eventName) url += `&event_name=${encodeURIComponent(eventName)}`;
     if (search) url += `&search=${encodeURIComponent(search)}`;
     if (user) url += `&user=${encodeURIComponent(user)}`;
     if (mssqlError) url += `&mssql_error=${encodeURIComponent(mssqlError)}`;
-
-    // Числовые параметры длительности
     if (minDur && !isNaN(parseFloat(minDur))) {
         url += `&min_duration_ms=${parseFloat(minDur)}`;
     }
     if (maxDur && !isNaN(parseFloat(maxDur))) {
         url += `&max_duration_ms=${parseFloat(maxDur)}`;
     }
-
-    // 🔧 Параметры сортировки
+    if (timeFrom) {
+        url += `&time_from=${encodeURIComponent(timeFrom)}`;
+    }
+    if (timeTo) {
+        url += `&time_to=${encodeURIComponent(timeTo)}`;
+    }
     url += `&sort_by=${encodeURIComponent(currentSort.column)}&sort_order=${currentSort.order}`;
 
-    // Сохраняем текущие фильтры
-    currentFilters = { eventName, search, user, mssqlError, minDur, maxDur };
+    currentFilters = { eventName, search, user, mssqlError, minDur, maxDur, timeFrom, timeTo };
 
     try {
         const response = await fetch(url);
-
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-
         const data = await response.json();
+
+        // 🔧 Заполняем поля времени из ответа API
+        if (data.filters) {
+            const timeFromField = document.getElementById('filter-time-from');
+            const timeToField = document.getElementById('filter-time-to');
+
+            console.log('🔍 API response filters:', data.filters);
+            console.log(' session_start:', data.filters.session_start);
+            console.log(' session_end:', data.filters.session_end);
+
+            if (timeFromField && data.filters.session_start) {
+                const isUserEdited = timeFromField.dataset.userEdited === 'true';
+                if (!isUserEdited || timeFromField.value === '') {
+                    timeFromField.value = data.filters.session_start;
+                    timeFromField.dataset.userEdited = 'false';
+                    console.log('✅ Заполнил time_from:', data.filters.session_start);
+                }
+            }
+            if (timeToField && data.filters.session_end) {
+                const isUserEdited = timeToField.dataset.userEdited === 'true';
+                if (!isUserEdited || timeToField.value === '') {
+                    timeToField.value = data.filters.session_end;
+                    timeToField.dataset.userEdited = 'false';
+                    console.log('✅ Заполнил time_to:', data.filters.session_end);
+                }
+            }
+        }
+
         renderEvents(data);
-
-        // Обновить индикаторы сортировки после рендера таблицы
         updateSortIndicators();
-
     } catch (error) {
         console.error('❌ Ошибка загрузки событий:', error);
         container.innerHTML = `
@@ -458,6 +479,7 @@ async function loadEvents() {
         `;
     }
 }
+
 
 // Отрисовка таблицы событий
 function renderEvents(data) {
@@ -501,8 +523,11 @@ function renderEvents(data) {
             ? `<span class="badge bg-danger" title="Код ошибки MSSQL: ${event.mssql_error_code}">⚠️ ${event.mssql_error_code}</span>`
             : '<span class="text-muted small">—</span>';
 
+        // 🔧 КЛИКАБЕЛЬНАЯ СТРОКА: добавляем data-event-json и класс clickable-row
         html += `
-            <tr>
+            <tr class="clickable-row"
+                data-event-json='${JSON.stringify(event).replace(/'/g, "&apos;")}'
+                title="🔍 Кликните для просмотра деталей">
                 <td><small class="text-muted">${new Date(event.timestamp).toLocaleString('ru-RU')}</small></td>
                 <td>
                     ${escapeHtml(event.event_name)}
@@ -513,7 +538,7 @@ function renderEvents(data) {
                 <td><small>${escapeHtml(event.process_name || '-')}</small></td>
                 <td><span class="badge bg-${getSeverityColor(event.severity)}">${event.severity}</span></td>
                 <td>${mssqlErrorDisplay}</td>
-                <td>
+                <td onclick="event.stopPropagation()">
                     <button class="btn btn-sm btn-outline-primary" onclick="showEventDetail(this)"
                             data-event='${JSON.stringify(event).replace(/'/g, "&apos;")}'
                             title="Показать детали">
@@ -551,30 +576,24 @@ function renderEvents(data) {
         resultsCount.textContent = `${data.total.toLocaleString('ru-RU')} событий`;
         resultsCount.className = `badge bg-${data.total > 0 ? 'success' : 'secondary'}`;
     }
+
+    // 🔧 ДОБАВЛЯЕМ ОБРАБОТЧИК КЛИКА ПО СТРОКЕ
+    container.querySelectorAll('tr.clickable-row').forEach(row => {
+        row.addEventListener('click', function(e) {
+            // Игнорируем клики по кнопкам и интерактивным элементам
+            if (e.target.closest('button, a, input, select, textarea')) {
+                return;
+            }
+            // Получаем данные события из data-атрибута
+            const eventData = JSON.parse(this.getAttribute('data-event-json').replace(/&apos;/g, "'"));
+            // Показываем модальное окно
+            showEventDetailFromRow(eventData);
+        });
+    });
 }
 
-// Изменение страницы
-function changePage(page) {
-    if (page < 1) return;
-    currentPage = page;
-    loadEvents();
-}
-
-// Определение цвета для severity
-function getSeverityColor(severity) {
-    const colors = {
-        'critical': 'danger',
-        'warning': 'warning text-dark',
-        'info': 'info text-dark',
-        'debug': 'secondary'
-    };
-    return colors[severity?.toLowerCase()] || 'secondary';
-}
-
-// Показать детали события
-async function showEventDetail(button) {
-    const eventData = JSON.parse(button.getAttribute('data-event'));
-
+// 🔧 НОВАЯ ФУНКЦИЯ: показать детали из клика по строке
+function showEventDetailFromRow(eventData) {
     const modalBody = document.getElementById('event-modal-body');
     const modalTitle = document.querySelector('#eventModal .modal-title');
 
@@ -638,7 +657,6 @@ async function showEventDetail(button) {
                         </dl>
                     </div>
                 </div>
-
                 ${eventData.mssql_error_code ? `
                 <div class="alert alert-danger mt-3 mb-0 py-2">
                     <i class="bi bi-exclamation-triangle-fill"></i>
@@ -773,6 +791,231 @@ async function showEventDetail(button) {
     `;
 
     modalBody.innerHTML = toggleButton + basicFields + technicalFields + textFields;
+
+    const modal = new bootstrap.Modal(document.getElementById('eventModal'));
+    modal.show();
+}
+
+
+// Изменение страницы
+function changePage(page) {
+    if (page < 1) return;
+    currentPage = page;
+    loadEvents();
+}
+
+// Определение цвета для severity
+function getSeverityColor(severity) {
+    const colors = {
+        'critical': 'danger',
+        'warning': 'warning text-dark',
+        'info': 'info text-dark',
+        'debug': 'secondary'
+    };
+    return colors[severity?.toLowerCase()] || 'secondary';
+}
+
+// Показать детали события
+async function showEventDetail(button) {
+    const eventData = JSON.parse(button.getAttribute('data-event'));
+    const modalBody = document.getElementById('event-modal-body');
+    const modalTitle = document.querySelector('#eventModal .modal-title');
+
+    if (modalTitle) {
+        modalTitle.innerHTML = `📋 Детали события: <code>${escapeHtml(eventData.event_name)}</code>`;
+    }
+
+    const formatValue = (value) => {
+        if (value === null || value === undefined || value === '') return '-';
+        if (typeof value === 'object') return JSON.stringify(value, null, 2);
+        if (typeof value === 'number') return value.toLocaleString('ru-RU');
+        return escapeHtml(String(value));
+    };
+
+    const toggleButton = `
+        <div class="mb-3">
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleAllFields(this)">
+                <span class="toggle-text">📄 Показать все поля</span>
+            </button>
+            <span class="text-muted ms-2 small">Показаны основные поля. Нажмите для отображения всех технических деталей.</span>
+        </div>
+    `;
+
+    const basicFields = `
+        <div class="card mb-3">
+            <div class="card-header bg-primary text-white">
+                <h6 class="mb-0">📋 Основная информация</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <dl class="row mb-0">
+                            <dt class="col-sm-5 text-muted">⏰ Время</dt>
+                            <dd class="col-sm-7"><strong>${eventData.timestamp ? new Date(eventData.timestamp).toLocaleString('ru-RU') : '-'}</strong></dd>
+                            <dt class="col-sm-5 text-muted">📝 Тип события</dt>
+                            <dd class="col-sm-7"><span class="badge bg-secondary">${escapeHtml(eventData.event_name)}</span></dd>
+                            <dt class="col-sm-5 text-muted">🔢 Уровень</dt>
+                            <dd class="col-sm-7"><span class="badge bg-info text-dark">${eventData.level}</span></dd>
+                            <dt class="col-sm-5 text-muted">⏱ Длительность</dt>
+                            <dd class="col-sm-7"><code>${eventData.duration_ms ? eventData.duration_ms.toFixed(2) + ' мс' : '-'}</code></dd>
+                            <dt class="col-sm-5 text-muted">🚨 Severity</dt>
+                            <dd class="col-sm-7"><span class="badge bg-${getSeverityColor(eventData.severity)}">${eventData.severity}</span></dd>
+                            <dt class="col-sm-5 text-muted">📁 Категория</dt>
+                            <dd class="col-sm-7">${escapeHtml(eventData.category) || '-'}</dd>
+                        </dl>
+                    </div>
+                    <div class="col-md-6">
+                        <dl class="row mb-0">
+                            <dt class="col-sm-5 text-muted">📁 Инфобаза</dt>
+                            <dd class="col-sm-7">${escapeHtml(eventData.directory_name) || '-'}</dd>
+                            <dt class="col-sm-5 text-muted">🖥 Процесс</dt>
+                            <dd class="col-sm-7">${escapeHtml(eventData.process_name) || '-'}</dd>
+                            <dt class="col-sm-5 text-muted">👤 Пользователь</dt>
+                            <dd class="col-sm-7">${escapeHtml(eventData.user_name) || '-'}</dd>
+                            <dt class="col-sm-5 text-muted">📄 Файл лога</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.source_file) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">📍 Строка</dt>
+                            <dd class="col-sm-7"><small>${eventData.line_number || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">🗄 Таблица</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.table_name) || '-'}</small></dd>
+                        </dl>
+                    </div>
+                </div>
+                ${eventData.mssql_error_code ? `
+                <div class="alert alert-danger mt-3 mb-0 py-2">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                    <strong>Код ошибки MSSQL:</strong>
+                    <span class="badge bg-danger ms-2">${eventData.mssql_error_code}</span>
+                    <small class="text-muted ms-2">
+                        ${getMssqlErrorDescription(eventData.mssql_error_code)}
+                    </small>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+
+    const technicalFields = `
+        <div class="card mb-3 additional-fields" style="display: none;">
+            <div class="card-header bg-info text-white">
+                <h6 class="mb-0">🔧 Технические поля</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <dl class="row mb-0">
+                            <dt class="col-sm-5 text-muted">DB PID</dt>
+                            <dd class="col-sm-7"><code>${escapeHtml(eventData.dbpid) || '-'}</code></dd>
+                            <dt class="col-sm-5 text-muted">OS Thread</dt>
+                            <dd class="col-sm-7"><code>${escapeHtml(eventData.osThread) || '-'}</code></dd>
+                            <dt class="col-sm-5 text-muted">Session ID</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.sessionID) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Computer</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.computerName) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Connect ID</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.connectID) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Trans</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.trans) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Func</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.func) || '-'}</small></dd>
+                        </dl>
+                    </div>
+                    <div class="col-md-6">
+                        <dl class="row mb-0">
+                            <dt class="col-sm-5 text-muted">Locks</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.locks) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Wait Connections</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.waitConnections) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Deadlock Intersections</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.deadlockConnectionIntersections) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">lkaid</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.lkaid) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">lka</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.lka) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">lkp</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.lkp) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">lkpid</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.lkpid) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">lksrc</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.lksrc) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Rows</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.rows) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Rows Affected</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.rowsAffected) || '-'}</small></dd>
+                            <dt class="col-sm-5 text-muted">Data</dt>
+                            <dd class="col-sm-7"><small>${escapeHtml(eventData.data) || '-'}</small></dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const textFields = `
+        ${eventData.context ? `
+        <div class="card mb-3">
+            <div class="card-header bg-light">
+                <h6 class="mb-0">📝 Контекст</h6>
+            </div>
+            <div class="card-body">
+                <pre class="bg-light p-3 rounded mb-0" style="max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85em;">${escapeHtml(eventData.context)}</pre>
+            </div>
+        </div>
+        ` : ''}
+        ${eventData.sql ? `
+        <div class="card mb-3">
+            <div class="card-header bg-light">
+                <h6 class="mb-0">🗄 SQL запрос</h6>
+            </div>
+            <div class="card-body">
+                <pre class="bg-light p-3 rounded mb-0" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85em;">${escapeHtml(eventData.sql)}</pre>
+            </div>
+        </div>
+        ` : ''}
+        ${eventData.planSQLText ? `
+        <div class="card mb-3">
+            <div class="card-header bg-light">
+                <h6 class="mb-0">📋 План выполнения SQL</h6>
+            </div>
+            <div class="card-body">
+                <pre class="bg-light p-3 rounded mb-0" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85em;">${escapeHtml(eventData.planSQLText)}</pre>
+            </div>
+        </div>
+        ` : ''}
+        ${eventData.sdbl ? `
+        <div class="card mb-3">
+            <div class="card-header bg-light">
+                <h6 class="mb-0">📊 SDBL запрос</h6>
+            </div>
+            <div class="card-body">
+                <pre class="bg-light p-3 rounded mb-0" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85em;">${escapeHtml(eventData.sdbl)}</pre>
+            </div>
+        </div>
+        ` : ''}
+        ${eventData.exception ? `
+        <div class="card mb-3">
+            <div class="card-header bg-danger text-white">
+                <h6 class="mb-0">⚠️ Исключение</h6>
+            </div>
+            <div class="card-body">
+                <pre class="bg-danger bg-opacity-10 p-3 rounded mb-0" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85em;">${escapeHtml(eventData.exception)}</pre>
+            </div>
+        </div>
+        ` : ''}
+        ${eventData.description ? `
+        <div class="card mb-3">
+            <div class="card-header bg-light">
+                <h6 class="mb-0">📄 Описание</h6>
+            </div>
+            <div class="card-body">
+                <pre class="bg-light p-3 rounded mb-0" style="max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.85em;">${escapeHtml(eventData.description)}</pre>
+            </div>
+        </div>
+        ` : ''}
+    `;
+
+    modalBody.innerHTML = toggleButton + basicFields + technicalFields + textFields;
+
     const modal = new bootstrap.Modal(document.getElementById('eventModal'));
     modal.show();
 }
@@ -821,17 +1064,18 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+
 // Глобальная переменная для данных отчёта
 let reportData = null;
 
-// 🔧 Открытие модального окна отчёта
+// Открытие модального окна отчёта
 async function openReportModal() {
     const modalBody = document.getElementById('report-modal-body');
     const modalEl = document.getElementById('reportModal');
-
     if (!modalEl) return;
 
     const reportModal = new bootstrap.Modal(modalEl);
+
     modalBody.innerHTML = `
         <div class="text-center py-5">
             <div class="spinner-border text-success" role="status">
@@ -844,16 +1088,12 @@ async function openReportModal() {
     reportModal.show();
 
     try {
-        // 🔧 Запрос данных отчёта
         const response = await fetch(`/api/events/{{ session_id }}/report`);
-
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
-
         reportData = await response.json();
         renderReport(reportData);
-
     } catch (error) {
         console.error('❌ Ошибка загрузки отчёта:', error);
         modalBody.innerHTML = `
@@ -864,16 +1104,14 @@ async function openReportModal() {
     }
 }
 
-// 🔧 Отрисовка отчёта
+// Отрисовка отчёта
 function renderReport(data) {
     const container = document.getElementById('report-modal-body');
 
-    // Форматирование дат
     const formatDate = (iso) => iso ? new Date(iso).toLocaleString('ru-RU') : '—';
     const formatNumber = (n) => new Intl.NumberFormat('ru-RU').format(n || 0);
     const formatPercent = (p) => p ? `${p.toFixed(1)}%` : '0%';
 
-    // 🔧 Карточки с общей статистикой
     const summaryCards = `
         <div class="row g-3 mb-4">
             <div class="col-md-3">
@@ -911,7 +1149,6 @@ function renderReport(data) {
         </div>
     `;
 
-    // 🔧 Временной диапазон
     const timeRange = `
         <div class="card mb-4">
             <div class="card-header">📅 Временной диапазон</div>
@@ -921,10 +1158,8 @@ function renderReport(data) {
                         <dl class="row">
                             <dt class="col-sm-4 text-muted">Начало</dt>
                             <dd class="col-sm-8">${formatDate(data.time_range.start)}</dd>
-
                             <dt class="col-sm-4 text-muted">Конец</dt>
                             <dd class="col-sm-8">${formatDate(data.time_range.end)}</dd>
-
                             <dt class="col-sm-4 text-muted">Длительность</dt>
                             <dd class="col-sm-8">
                                 ${data.duration_seconds ?
@@ -939,7 +1174,6 @@ function renderReport(data) {
                             <dd class="col-sm-8">
                                 ${data.events_per_second ? data.events_per_second.toFixed(2) : '—'}
                             </dd>
-
                             <dt class="col-sm-4 text-muted">Событий/мин</dt>
                             <dd class="col-sm-8">
                                 ${data.events_per_minute ? data.events_per_minute.toFixed(1) : '—'}
@@ -951,7 +1185,6 @@ function renderReport(data) {
         </div>
     `;
 
-    // 🔧 Статистика по типам событий (график + таблица)
     const eventTypesChart = data.event_types && Object.keys(data.event_types).length > 0 ? `
         <div class="card mb-4">
             <div class="card-header">📊 Распределение по типам событий</div>
@@ -981,11 +1214,11 @@ function renderReport(data) {
                                 .map(([type, count]) => {
                                     const percent = (count / data.total_events) * 100;
                                     return `
-                                    <tr>
-                                        <td><code>${escapeHtml(type)}</code></td>
-                                        <td class="text-end">${formatNumber(count)}</td>
-                                        <td class="text-end">${formatPercent(percent)}</td>
-                                    </tr>
+                                        <tr>
+                                            <td><code>${escapeHtml(type)}</code></td>
+                                            <td class="text-end">${formatNumber(count)}</td>
+                                            <td class="text-end">${formatPercent(percent)}</td>
+                                        </tr>
                                     `;
                                 }).join('')}
                         </tbody>
@@ -995,7 +1228,6 @@ function renderReport(data) {
         </div>
     ` : '';
 
-    // 🔧 Статистика по длительности
     const durationStats = `
         <div class="card mb-4">
             <div class="card-header">⏱ Статистика длительности</div>
@@ -1031,7 +1263,6 @@ function renderReport(data) {
         </div>
     `;
 
-    // 🔧 Ошибки MS SQL
     const mssqlErrorsTable = data.mssql_error_codes && data.mssql_error_codes.length > 0 ? `
         <div class="card mb-4">
             <div class="card-header bg-danger text-white">⚠️ Ошибки MS SQL</div>
@@ -1047,11 +1278,11 @@ function renderReport(data) {
                         </thead>
                         <tbody>
                             ${data.mssql_error_codes.map(err => `
-                            <tr>
-                                <td><span class="badge bg-danger">${err.code}</span></td>
-                                <td><small>${getMssqlErrorDescription(err.code)}</small></td>
-                                <td class="text-end">${formatNumber(err.count)}</td>
-                            </tr>
+                                <tr>
+                                    <td><span class="badge bg-danger">${err.code}</span></td>
+                                    <td><small>${getMssqlErrorDescription(err.code)}</small></td>
+                                    <td class="text-end">${formatNumber(err.count)}</td>
+                                </tr>
                             `).join('')}
                         </tbody>
                     </table>
@@ -1064,7 +1295,6 @@ function renderReport(data) {
         </div>
     `;
 
-    // 🔧 Статистика по пользователям
     const usersTable = data.top_users && data.top_users.length > 0 ? `
         <div class="card mb-4">
             <div class="card-header">👥 Топ пользователей</div>
@@ -1082,11 +1312,11 @@ function renderReport(data) {
                             ${data.top_users.map(user => {
                                 const percent = (user.count / data.total_events) * 100;
                                 return `
-                                <tr>
-                                    <td><code>${escapeHtml(user.usr)}</code></td>
-                                    <td class="text-end">${formatNumber(user.count)}</td>
-                                    <td class="text-end">${formatPercent(percent)}</td>
-                                </tr>
+                                    <tr>
+                                        <td><code>${escapeHtml(user.usr)}</code></td>
+                                        <td class="text-end">${formatNumber(user.count)}</td>
+                                        <td class="text-end">${formatPercent(percent)}</td>
+                                    </tr>
                                 `;
                             }).join('')}
                         </tbody>
@@ -1096,7 +1326,6 @@ function renderReport(data) {
         </div>
     ` : '';
 
-    // 🔧 Сборка всего отчёта
     let html = `
         ${summaryCards}
         ${timeRange}
@@ -1109,18 +1338,16 @@ function renderReport(data) {
 
     container.innerHTML = html;
 
-    // 🔧 Отрисовка графика если есть данные
     if (data.event_types && Object.keys(data.event_types).length > 0) {
         renderEventTypesChart(data.event_types, data.total_events);
     }
 }
 
-// 🔧 Отрисовка графика типов событий
+// Отрисовка графика типов событий
 function renderEventTypesChart(eventTypes, totalEvents) {
     const ctx = document.getElementById('event-types-chart')?.getContext('2d');
     if (!ctx) return;
 
-    // Берём топ-10 типов
     const entries = Object.entries(eventTypes)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10);
@@ -1167,7 +1394,7 @@ function renderEventTypesChart(eventTypes, totalEvents) {
     });
 }
 
-// 🔧 Экспорт отчёта в CSV
+// Экспорт отчёта в CSV
 function exportReport() {
     if (!reportData) return;
 
@@ -1205,7 +1432,6 @@ function exportReport() {
         ])
     ];
 
-    // Генерация CSV
     const csv = rows.map(row =>
         row.map(cell => {
             const val = cell ?? '';
@@ -1213,7 +1439,6 @@ function exportReport() {
         }).join(',')
     ).join('\n');
 
-    // Скачивание файла
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1222,28 +1447,74 @@ function exportReport() {
     link.click();
     URL.revokeObjectURL(url);
 }
+// 🔧 Экспорт событий в CSV/XLSX
+function exportEvents(format) {
+    // Собираем текущие фильтры
+    const eventName = document.getElementById('filter-event-name').value;
+    const search = document.getElementById('filter-search').value;
+    const user = document.getElementById('filter-user').value;
+    const mssqlError = document.getElementById('filter-mssql-error').value;
+    const minDur = document.getElementById('filter-min-dur').value;
+    const maxDur = document.getElementById('filter-max-dur').value;
+    const timeFrom = document.getElementById('filter-time-from')?.value.trim() || '';
+    const timeTo = document.getElementById('filter-time-to')?.value.trim() || '';
 
+    // Формируем URL
+    let url = `/api/events/{{ session_id }}/export?format=${format}`;
+    if (eventName) url += `&event_name=${encodeURIComponent(eventName)}`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (user) url += `&user=${encodeURIComponent(user)}`;
+    if (mssqlError) url += `&mssql_error=${encodeURIComponent(mssqlError)}`;
+    if (minDur && !isNaN(parseFloat(minDur))) {
+        url += `&min_duration_ms=${parseFloat(minDur)}`;
+    }
+    if (maxDur && !isNaN(parseFloat(maxDur))) {
+        url += `&max_duration_ms=${parseFloat(maxDur)}`;
+    }
+    if (timeFrom) {
+        url += `&time_from=${encodeURIComponent(timeFrom)}`;
+    }
+    if (timeTo) {
+        url += `&time_to=${encodeURIComponent(timeTo)}`;
+    }
 
+    console.log(`📤 Экспорт: ${url}`);
+
+    // Открываем в новом окне для скачивания
+    window.open(url, '_blank');
+}
 </script>
 
-<!-- 🔧 Стили для сортировки -->
+<!-- Стили для сортировки -->
 <style>
-    th[onclick] {
-        cursor: pointer;
-        user-select: none;
-        transition: background-color 0.2s;
-    }
-    th[onclick]:hover {
-        background-color: rgba(0,0,0,0.05);
-    }
-    .sort-indicator {
-        font-size: 0.8em;
-        opacity: 0.6;
-        transition: opacity 0.2s;
-    }
-    .sort-indicator.text-primary {
-        opacity: 1;
-        font-weight: bold;
-    }
+th[onclick] {
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s;
+}
+th[onclick]:hover {
+    background-color: rgba(0,0,0,0.05);
+}
+.sort-indicator {
+    font-size: 0.8em;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+.sort-indicator.text-primary {
+    opacity: 1;
+    font-weight: bold;
+}
+/* Стили для кнопки экспорта */
+.btn-group .btn {
+    border-radius: 0;
+}
+.btn-group .btn:first-child {
+    border-top-left-radius: 0.375rem;
+    border-bottom-left-radius: 0.375rem;
+}
+.btn-group .btn:last-child {
+    border-top-right-radius: 0.375rem;
+    border-bottom-right-radius: 0.375rem;
+}
 </style>
 {% endblock %}

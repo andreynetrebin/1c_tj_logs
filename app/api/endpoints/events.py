@@ -4,7 +4,7 @@ API эндпоинты для работы с событиями из ClickHouse
 """
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response  # 🔧 Добавили Response
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -190,13 +190,17 @@ async def get_events(
         event_name: Optional[str] = Query(None, description="Фильтр по типу события"),
         severity: Optional[str] = Query(None, description="Фильтр по серьёзности"),
         category: Optional[str] = Query(None, description="Фильтр по категории"),
-        min_duration_ms: Optional[float] = Query(None),  # ✅ Должно быть
-        max_duration_ms: Optional[float] = Query(None),  # ✅ Должно быть
+        min_duration_ms: Optional[float] = Query(None),
+        max_duration_ms: Optional[float] = Query(None),
         directory_name: Optional[str] = Query(None, description="Фильтр по инфобазе"),
         duration_min: Optional[float] = Query(None, description="Мин. длительность (мс)"),
         duration_max: Optional[float] = Query(None, description="Макс. длительность (мс)"),
         search: Optional[str] = Query(None, description="Поиск по тексту (context, sql, exception)"),
-        user: Optional[str] = Query(None, description="Фильтр по пользователю"),  # 🔧 НОВОЕ
+        user: Optional[str] = Query(None, description="Фильтр по пользователю"),
+        mssql_error: Optional[int] = Query(None, description="Фильтр по коду ошибки MSSQL (например, 1205)"),
+        # 🔧 НОВОЕ: Фильтры по времени с миллисекундами
+        time_from: Optional[str] = Query(None, description="Время от: YYYY-MM-DD HH:MM:SS.mmm"),
+        time_to: Optional[str] = Query(None, description="Время до: YYYY-MM-DD HH:MM:SS.mmm"),
         page: int = Query(1, ge=1, description="Номер страницы"),
         page_size: int = Query(50, ge=1, le=1000, description="Размер страницы"),
         sort_by: Optional[str] = Query('timestamp', description="Поле для сортировки"),
@@ -228,56 +232,76 @@ async def get_events(
     table_name = _get_session_table_name(session_id)
     database = settings.database.clickhouse.database
 
-    # 3. Построить WHERE clause (БЕЗ sessionID — таблица уже идентифицирует сессию)
+    # 🔧 3. Установить значения по умолчанию для time_from/time_to из интервала сессии
+    # Если параметры не переданы — используем границы сессии
+    if time_from is None and session.start_date:
+        # Форматируем в формат: YYYY-MM-DD HH:MM:SS.mmm
+        time_from = session.start_date.strftime('%Y-%m-%d %H:%M:%S.') + f'{session.start_date.microsecond // 1000:03d}'
+
+    if time_to is None and session.end_date:
+        time_to = session.end_date.strftime('%Y-%m-%d %H:%M:%S.') + f'{session.end_date.microsecond // 1000:03d}'
+
+    # 4. Построить WHERE clause
     where_conditions = []
 
+    # 🔧 Вспомогательная функция для экранирования строк (защита от SQL injection)
+    def escape_sql_string(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return value.replace("'", "''")
+
+    # Строковые фильтры (с экранированием)
     if event_name:
-        where_conditions.append(f"event_name = '{event_name}'")
+        where_conditions.append(f"event_name = '{escape_sql_string(event_name)}'")
     if severity:
-        where_conditions.append(f"severity = '{severity}'")
+        where_conditions.append(f"severity = '{escape_sql_string(severity)}'")
     if category:
-        where_conditions.append(f"category = '{category}'")
+        where_conditions.append(f"category = '{escape_sql_string(category)}'")
     if directory_name:
-        where_conditions.append(f"directory_name = '{directory_name}'")
+        where_conditions.append(f"directory_name = '{escape_sql_string(directory_name)}'")
+    if user:
+        where_conditions.append(f"usr = '{escape_sql_string(user)}'")
+
+    # Числовые фильтры (безопасны, т.к. типизированы)
     if duration_min is not None:
-        where_conditions.append(f"duration_ms >= {duration_min}")
+        where_conditions.append(f"duration_ms >= {float(duration_min)}")
     if duration_max is not None:
-        where_conditions.append(f"duration_ms <= {duration_max}")
-    if user:  # 🔧 НОВОЕ
-        user_escaped = user.replace("'", "''")
-        where_conditions.append(f"usr = '{user_escaped}'")
-
+        where_conditions.append(f"duration_ms <= {float(duration_max)}")
     if min_duration_ms is not None:
-        try:
-            where_conditions.append(f"duration_ms >= {float(min_duration_ms)}")
-        except (ValueError, TypeError):
-            pass
-
+        where_conditions.append(f"duration_ms >= {float(min_duration_ms)}")
     if max_duration_ms is not None:
-        try:
-            where_conditions.append(f"duration_ms <= {float(max_duration_ms)}")
-        except (ValueError, TypeError):
-            pass
+        where_conditions.append(f"duration_ms <= {float(max_duration_ms)}")
 
-    # 🔍 ПОИСК ПО ТЕКСТУ: контекст, SQL, исключение
+    # 🔧 Фильтр по коду ошибки MSSQL
+    if mssql_error is not None:
+        where_conditions.append(f"mssql_error_code = {int(mssql_error)}")
+
+    # 🔧 ФИЛЬТРЫ ПО ВРЕМЕНИ (с миллисекундами)
+    # ClickHouse функция parseDateTimeBestEffort поддерживает формат с миллисекундами
+    if time_from:
+        # Экранирование не нужно, т.к. формат строго фиксирован и валидируется на фронтенде
+        where_conditions.append(f"timestamp >= parseDateTimeBestEffort('{escape_sql_string(time_from)}')")
+
+    if time_to:
+        where_conditions.append(f"timestamp <= parseDateTimeBestEffort('{escape_sql_string(time_to)}')")
+
+    # 🔍 ПОИСК ПО ТЕКСТУ
     if search:
-        # Экранирование для предотвращения SQL injection
-        search_escaped = search.replace("'", "''")
+        search_escaped = escape_sql_string(search)
         where_conditions.append(
             f"(context LIKE '%{search_escaped}%' OR sql LIKE '%{search_escaped}%' OR sdbl LIKE '%{search_escaped}%')"
         )
-        logger.info(f"🔍 Поиск: '{search}' → экранировано: '{search_escaped}'")
 
     where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
 
-    logger.info(f"📋 Запрос событий: session={session_id}, search={search}, where={where_clause}")
+    logger.info(
+        f"📋 Запрос событий: session={session_id}, time_from={time_from}, time_to={time_to}, where={where_clause}")
 
-    # 4. Подключиться к ClickHouse
+    # 5. Подключиться к ClickHouse
     ch_client = get_clickhouse_client()
     offset = (page - 1) * page_size
 
-    # 5. Запрос к ClickHouse с пагинацией
-    # 🔧 ВСЕ 36 ПОЛЕЙ для полного отображения в модальном окне
+    # 6. Запрос к ClickHouse с пагинацией
     query = f"""
     SELECT 
         timestamp, event_name, level, duration_ms,
@@ -310,7 +334,7 @@ async def get_events(
             }
         raise HTTPException(status_code=500, detail=f"Ошибка ClickHouse: {str(e)}")
 
-    # 6. Преобразовать результаты
+    # 7. Преобразовать результаты
     events = []
     for row in result.result_rows:
         events.append({
@@ -322,14 +346,13 @@ async def get_events(
             'user_name': row[5],
             'table_name': row[6],
             'context': row[7][:1000] if row[7] else None,
-            'sql': row[8][:1000] if row[8] else None,  # ✅ SQL запрос
+            'sql': row[8][:1000] if row[8] else None,
             'exception': row[9][:1000] if row[9] else None,
             'severity': row[10],
             'category': row[11],
             'directory_name': row[12],
             'source_file': row[13],
             'line_number': row[14],
-            # 🔧 Технические поля для модального окна
             'computerName': row[15],
             'connectID': row[16],
             'dbpid': row[17],
@@ -349,12 +372,12 @@ async def get_events(
             'rowsAffected': row[31],
             'description': row[32],
             'data': row[33],
-            'planSQLText': row[34][:1000] if row[34] else None,  # ✅ План выполнения SQL
-            'sdbl': row[35][:1000] if row[35] else None,  # ✅ SDBL запрос
-            'mssql_error_code': row[36] if len(row) > 36 else None,  # 🔧 НОВОЕ
+            'planSQLText': row[34][:1000] if row[34] else None,
+            'sdbl': row[35][:1000] if row[35] else None,
+            'mssql_error_code': row[36] if len(row) > 36 else None,
         })
 
-    # 7. Получить общее количество (для пагинации)
+    # 8. Получить общее количество (для пагинации)
     count_query = f"""
     SELECT count() FROM {database}.`{table_name}`
     WHERE {where_clause}
@@ -363,6 +386,16 @@ async def get_events(
         total = ch_client.query(count_query).first_row[0]
     except:
         total = 0
+
+    # 🔧 3. Установить значения по умолчанию для time_from/time_to из интервала сессии
+    if time_from is None and session.start_date:
+        # Конвертируем datetime в строку с миллисекундами
+        time_from = session.start_date.strftime('%Y-%m-%d %H:%M:%S.') + f'{session.start_date.microsecond // 1000:03d}'
+        logger.info(f"🕐 time_from из сессии: {time_from}")
+
+    if time_to is None and session.end_date:
+        time_to = session.end_date.strftime('%Y-%m-%d %H:%M:%S.') + f'{session.end_date.microsecond // 1000:03d}'
+        logger.info(f"🕐 time_to из сессии: {time_to}")
 
     logger.info(
         f"✅ Найдено {len(events)} событий (из {total} всего), страница {page}/{(total + page_size - 1) // page_size if page_size > 0 else 1}")
@@ -381,10 +414,18 @@ async def get_events(
             'directory_name': directory_name,
             'duration_min': duration_min,
             'duration_max': duration_max,
-            'search': search
+            'search': search,
+            'mssql_error': mssql_error,
+            # 🔧 Возвращаем временные фильтры (для сохранения состояния на фронтенде)
+            'time_from': time_from,
+            'time_to': time_to,
+            # 🔧 Границы сессии (для инициализации полей на фронтенде при первом заходе)
+            'session_start': session.start_date.strftime(
+                '%Y-%m-%d %H:%M:%S.') + f'{session.start_date.microsecond // 1000:03d}' if session.start_date else None,
+            'session_end': session.end_date.strftime(
+                '%Y-%m-%d %H:%M:%S.') + f'{session.end_date.microsecond // 1000:03d}' if session.end_date else None,
         }
     }
-
 
 @router.get("/{session_id}/detail/{event_index}", response_model=Dict[str, Any])
 async def get_event_detail(
@@ -650,3 +691,228 @@ async def get_session_report(
     logger.info(f"📊 Отчёт сгенерирован для сессии {session_id[:8]}...")
 
     return result
+
+
+@router.get("/{session_id}/export")
+async def export_events(
+        session_id: str,
+        format: str = Query("csv", description="Формат: csv или xlsx"),
+        event_name: Optional[str] = Query(None),
+        severity: Optional[str] = Query(None),
+        category: Optional[str] = Query(None),
+        min_duration_ms: Optional[float] = Query(None),
+        max_duration_ms: Optional[float] = Query(None),
+        directory_name: Optional[str] = Query(None),
+        search: Optional[str] = Query(None),
+        user: Optional[str] = Query(None),
+        mssql_error: Optional[int] = Query(None),
+        time_from: Optional[str] = Query(None),
+        time_to: Optional[str] = Query(None),
+        db: Session = Depends(get_db)
+):
+    """Экспорт событий в CSV или XLSX"""
+
+    # Проверка сессии
+    session = db.query(ParsingSession).filter(
+        ParsingSession.session_id == session_id
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+
+    # Получение имени таблицы
+    table_name = _get_session_table_name(session_id)
+    database = settings.database.clickhouse.database
+    ch_client = get_clickhouse_client()
+
+    # Построение WHERE clause (аналогично get_events)
+    where_conditions = []
+
+    def escape_sql_string(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return value.replace("'", "''")
+
+    if event_name:
+        where_conditions.append(f"event_name = '{escape_sql_string(event_name)}'")
+    if severity:
+        where_conditions.append(f"severity = '{escape_sql_string(severity)}'")
+    if category:
+        where_conditions.append(f"category = '{escape_sql_string(category)}'")
+    if directory_name:
+        where_conditions.append(f"directory_name = '{escape_sql_string(directory_name)}'")
+    if user:
+        where_conditions.append(f"usr = '{escape_sql_string(user)}'")
+    if min_duration_ms is not None:
+        where_conditions.append(f"duration_ms >= {float(min_duration_ms)}")
+    if max_duration_ms is not None:
+        where_conditions.append(f"duration_ms <= {float(max_duration_ms)}")
+    if mssql_error is not None:
+        where_conditions.append(f"mssql_error_code = {int(mssql_error)}")
+    if time_from:
+        where_conditions.append(f"timestamp >= parseDateTimeBestEffort('{escape_sql_string(time_from)}')")
+    if time_to:
+        where_conditions.append(f"timestamp <= parseDateTimeBestEffort('{escape_sql_string(time_to)}')")
+    if search:
+        search_escaped = escape_sql_string(search)
+        where_conditions.append(
+            f"(context LIKE '%{search_escaped}%' OR sql LIKE '%{search_escaped}%' OR sdbl LIKE '%{search_escaped}%')"
+        )
+
+    where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
+
+    # Запрос всех событий (без пагинации для экспорта)
+    # 🔧 Ограничим 10000 записей для производительности
+    query = f"""
+    SELECT 
+        timestamp, event_name, level, duration_ms,
+        p_processName, usr, tableName, context, sql, exception,
+        severity, category, directory_name, source_file, line_number,
+        t_computerName, t_connectID, dbpid, osThread, sessionID,
+        trans, func, locks, waitConnections, deadlockConnectionIntersections,
+        lkaid, lka, lkp, lkpid, lksrc,
+        rows, rowsAffected, description, data, planSQLText, sdbl,
+        mssql_error_code
+    FROM {database}.`{table_name}`
+    WHERE {where_clause}
+    ORDER BY timestamp DESC
+    LIMIT 10000
+    """
+
+    logger.info(f"📤 Экспорт событий: format={format}, where={where_clause}")
+
+    try:
+        result = ch_client.query(query)
+    except Exception as e:
+        logger.error(f"❌ Ошибка экспорта: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка ClickHouse: {str(e)}")
+
+    # Подготовка данных
+    columns = [
+        'Время', 'Тип события', 'Уровень', 'Длительность (мс)',
+        'Процесс', 'Пользователь', 'Таблица', 'Контекст', 'SQL', 'Исключение',
+        'Severity', 'Категория', 'Инфобаза', 'Файл', 'Строка',
+        'Компьютер', 'Connect ID', 'DB PID', 'OS Thread', 'Session ID',
+        'Trans', 'Func', 'Locks', 'Wait Connections', 'Deadlock Intersections',
+        'lkaid', 'lka', 'lkp', 'lkpid', 'lksrc',
+        'Rows', 'Rows Affected', 'Описание', 'Data', 'Plan SQL', 'SDBL',
+        'Код ошибки MSSQL'
+    ]
+
+    rows = []
+    for row in result.result_rows:
+        rows.append([
+            row[0].isoformat() if row[0] else '',  # timestamp
+            row[1] or '',  # event_name
+            row[2] or '',  # level
+            float(row[3]) if row[3] else 0,  # duration_ms
+            row[4] or '',  # p_processName
+            row[5] or '',  # usr
+            row[6] or '',  # tableName
+            (row[7] or '')[:1000],  # context
+            (row[8] or '')[:1000],  # sql
+            (row[9] or '')[:1000],  # exception
+            row[10] or '',  # severity
+            row[11] or '',  # category
+            row[12] or '',  # directory_name
+            row[13] or '',  # source_file
+            row[14] or '',  # line_number
+            row[15] or '',  # t_computerName
+            row[16] or '',  # t_connectID
+            row[17] or '',  # dbpid
+            row[18] or '',  # osThread
+            row[19] or '',  # sessionID
+            row[20] or '',  # trans
+            row[21] or '',  # func
+            row[22] or '',  # locks
+            row[23] or '',  # waitConnections
+            row[24] or '',  # deadlockConnectionIntersections
+            row[25] or '',  # lkaid
+            row[26] or '',  # lka
+            row[27] or '',  # lkp
+            row[28] or '',  # lkpid
+            row[29] or '',  # lksrc
+            row[30] or '',  # rows
+            row[31] or '',  # rowsAffected
+            row[32] or '',  # description
+            row[33] or '',  # data
+            (row[34] or '')[:1000],  # planSQLText
+            (row[35] or '')[:1000],  # sdbl
+            row[36] if len(row) > 36 else '',  # mssql_error_code
+        ])
+
+    # Генерация файла
+    timestamp_now = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"events_{session_id[:8]}_{timestamp_now}"
+
+    if format.lower() == 'xlsx':
+        return generate_xlsx(columns, rows, filename)
+    else:
+        return generate_csv(columns, rows, filename)
+
+
+def generate_csv(columns: List[str], rows: List[List], filename: str):
+    """Генерация CSV файла"""
+    import csv
+    import io
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_ALL)
+    writer.writerow(columns)
+    writer.writerows(rows)
+
+    response = Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}.csv",
+            "Content-Type": "text/csv; charset=utf-8-sig"  # BOM для Excel
+        }
+    )
+    logger.info(f"✅ CSV сгенерирован: {len(rows)} записей")
+    return response
+
+
+def generate_xlsx(columns: List[str], rows: List[List], filename: str):
+    """Генерация XLSX файла"""
+    from openpyxl import Workbook
+    import io
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "События"
+
+    # Заголовки
+    ws.append(columns)
+
+    # Данные
+    for row in rows:
+        ws.append(row)
+
+    # Авто-ширина колонок
+    for column in ws.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = min(max_length + 2, 50)
+        ws.column_dimensions[column_letter].width = adjusted_width
+
+    # Сохранение в буфер
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    response = Response(
+        content=output.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}.xlsx"
+        }
+    )
+    logger.info(f"✅ XLSX сгенерирован: {len(rows)} записей")
+    return response
