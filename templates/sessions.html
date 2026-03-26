@@ -90,9 +90,12 @@
                 </thead>
                 <tbody>
                     {% for session in sessions %}
-                    <tr class="{% if session.status == 'running' %}table-info{% endif %}"
+                    <!-- 🔧 КЛИКАБЕЛЬНАЯ СТРОКА: class, data-href, title -->
+                    <tr class="clickable-row {% if session.status == 'running' %}table-info{% endif %}"
                         data-session-id="{{ session.session_id }}"
-                        data-status="{{ session.status }}">
+                        data-status="{{ session.status }}"
+                        data-href="/events/{{ session.session_id }}"
+                        title="👁 Открыть просмотр событий">
 
                         <!-- ID сессии -->
                         <td>
@@ -164,14 +167,14 @@
                             <span class="text-truncate d-inline-block" style="max-width: 90px;" title="{{ session.comment }}">
                                 {{ session.comment[:15] }}{% if session.comment|length > 15 %}...{% endif %}
                             </span>
-                            <button class="btn btn-link btn-sm p-0 ms-1" onclick="editComment('{{ session.session_id }}', '{{ session.comment | replace("'", "\\'") }}')" title="Редактировать">✏️</button>
+                            <button class="btn btn-link btn-sm p-0 ms-1" onclick="event.stopPropagation(); editComment('{{ session.session_id }}', '{{ session.comment | replace("'", "\\'") }}')" title="Редактировать">✏️</button>
                             {% else %}
                             <span class="text-muted">—</span>
                             {% endif %}
                         </td>
 
-                        <!-- Кнопки действий -->
-                        <td>
+                        <!-- Кнопки действий (onclick для остановки всплытия) -->
+                        <td onclick="event.stopPropagation()">
                             <div class="btn-group btn-group-sm">
                                 {% if session.status == 'running' %}
                                     <a href="/parsing/progress/{{ session.session_id }}" class="btn btn-outline-primary" title="Прогресс">👁</a>
@@ -296,7 +299,27 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Авто-обновление прогресса для running-сессий (адаптировано для таблицы)
+    // 🔧 ОБРАБОТЧИК КЛИКА ПО СТРОКЕ ТАБЛИЦЫ
+    document.querySelectorAll('tr.clickable-row').forEach(row => {
+        row.addEventListener('click', function(e) {
+            // Игнорируем клики по кнопкам, ссылкам и интерактивным элементам
+            if (e.target.closest('.btn, .btn-group, button, a, input, select, textarea')) {
+                return;
+            }
+
+            const href = this.getAttribute('data-href');
+            if (href) {
+                // Открываем в новой вкладке если зажата Ctrl/Cmd или средний клик
+                if (e.ctrlKey || e.metaKey || e.button === 1) {
+                    window.open(href, '_blank');
+                } else {
+                    window.location.href = href;
+                }
+            }
+        });
+    });
+
+    // Авто-обновление прогресса для running-сессий
     startProgressAutoUpdate();
 });
 
@@ -359,7 +382,6 @@ document.getElementById('confirm-retry-btn')?.addEventListener('click', async fu
 
 // 🔧 Авто-обновление прогресса для running-сессий (адаптировано для таблицы)
 function startProgressAutoUpdate() {
-    // 🔧 Ищем строки таблицы со статусом "Выполняется"
     const runningRows = document.querySelectorAll('tbody tr[data-status="running"]');
 
     if (runningRows.length === 0) return;
@@ -391,9 +413,7 @@ function startProgressAutoUpdate() {
                 // Обновить счётчики файлов и событий
                 const cells = row.querySelectorAll('td');
                 if (cells.length >= 5 && data.processed_files !== undefined) {
-                    // Колонка "Файлы" (индекс 3)
                     if (cells[3]) cells[3].innerHTML = `<small>${data.processed_files}/${data.total_files}</small>`;
-                    // Колонка "События" (индекс 4)
                     if (cells[4]) cells[4].innerHTML = `<small>${new Intl.NumberFormat('ru-RU').format(data.total_events)}</small>`;
                 }
 
@@ -401,7 +421,7 @@ function startProgressAutoUpdate() {
                 console.warn(`Failed to update ${sessionId}:`, error);
             }
         }
-    }, 30000); // Каждые 30 секунд
+    }, 30000);
 }
 
 // 🔧 Полифиллы для старых браузеров
@@ -419,6 +439,44 @@ if (!Element.prototype.closest) {
     };
 }
 </script>
+
+<!-- 🔧 Стили для кликабельных строк -->
+{% block extra_css %}
+<style>
+    /* Курсор-рука для кликабельных строк */
+    tbody tr.clickable-row {
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+    }
+
+    /* Подсветка при наведении (кроме running-сессий) */
+    tbody tr.clickable-row:hover:not(.table-info) {
+        background-color: rgba(0, 123, 255, 0.08) !important;
+    }
+
+    /* Исключаем интерактивные элементы из клика по строке */
+    tbody tr.clickable-row .btn,
+    tbody tr.clickable-row .btn-group,
+    tbody tr.clickable-row button,
+    tbody tr.clickable-row a:not([data-href]),
+    tbody tr.clickable-row input,
+    tbody tr.clickable-row select,
+    tbody tr.clickable-row textarea {
+        cursor: default;
+    }
+
+    /* Визуальный индикатор для ID сессии */
+    tbody tr.clickable-row td:first-child {
+        color: #0d6efd;
+        font-weight: 500;
+    }
+
+    /* Подсветка при наведении на ID */
+    tbody tr.clickable-row:hover td:first-child {
+        text-decoration: underline;
+    }
+</style>
+{% endblock %}
 
 <!-- 🔧 Дополнительные фильтры Jinja2 для таблицы -->
 <script type="application/json" id="jinja-filters">
