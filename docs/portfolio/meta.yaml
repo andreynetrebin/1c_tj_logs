@@ -1,0 +1,60 @@
+# docs/portfolio/meta.yaml
+# Метаданные проекта для интеграции с портфолио
+
+project:
+  slug: "1c-tj-logs"
+  name: "1C TJ Logs Analyzer"
+  name_ru: "Анализатор технологических журналов 1С"
+
+  # Статус для бейджей
+  status: "active"  # active | maintenance | archived
+  version: "0.3.1"
+  last_updated: "2026-03-31"
+
+  # Категории для фильтрации в портфолио
+  tags:
+    - "1C"
+    - "ClickHouse"
+    - "FastAPI"
+    - "Observability"
+    - "Python"
+  domain:
+    - "1C-Enterprise"
+    - "DevOps"
+
+  # Ссылки
+  repo: "https://github.com/andreynetrebin/1c_tj_logs"
+  demo: null
+  docs: null
+
+  # Для карточки проекта на главной портфолио
+  short_description_ru: "Парсинг технологических журналов 1С с сохранением в ClickHouse и REST API для аналитики"
+  short_description_en: "Parsing 1C technological journals with ClickHouse storage and REST API for analytics"
+
+  # Ключевые метрики для отображения
+  key_metrics:
+    - "50K событий/мин парсинг"
+    - "90 дней хранения (TTL)"
+    - "Экспорт в CSV/XLSX"
+
+# Настройки синхронизации
+sync:
+  # Какие файлы копировать (относительно docs/portfolio/)
+  include:
+    - "*.md"
+    - "assets/**/*"
+
+  # Какие файлы игнорировать
+  exclude:
+    - "*.tmp"
+    - "draft_*.md"
+    - ".gitkeep"
+
+  # Пре-процессинг: заменить относительные ссылки на абсолютные
+  rewrite_links: true
+
+  # Добавить фронтматтер для MkDocs
+  add_frontmatter: true
+
+  # Максимальный размер файла в МБ (защита от раздувания портфолио)
+  max_file_size_mb: 10

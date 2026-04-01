@@ -1,0 +1,28 @@
+# .github/workflows/notify-portfolio.yml
+name: 🔄 Notify Portfolio on Docs Change
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/portfolio/**'
+  workflow_dispatch:
+
+jobs:
+  trigger-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📡 Отправить webhook в портфолио
+        run: |
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.PORTFOLIO_SYNC_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"event_type\": \"docs_updated\",
+              \"client_payload\": {
+                \"project\": \"1c_tj_logs\",
+                \"commit\": \"${{ github.sha }}\",
+                \"ref\": \"${{ github.ref }}\"
+              }
+            }" \
+            https://api.github.com/repos/andreynetrebin/portfolio/dispatches
